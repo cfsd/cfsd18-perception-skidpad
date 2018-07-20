@@ -1,0 +1,116 @@
+# Copyright (C) 2018  Christian Berger
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+cmake_minimum_required(VERSION 3.2)
+
+project(cfsd18-perception-skidpad)
+
+################################################################################
+# Defining the relevant versions of OpenDLV Standard Message Set and libcluon.
+set(OPENDLV_STANDARD_MESSAGE_SET opendlv-standard-message-set-v0.9.5.odvd)
+set(CLUON_COMPLETE cluon-complete-build.hpp)
+set(CMAKE_PREFIX_PATH ~/cluons)
+################################################################################
+# This project requires C++14 or newer.
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+# Strip unneeded symbols from binaries.
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
+# Build a static binary.
+set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
+# Add further warning levels.
+#Change flag back to O2 or 3 when not debugging
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} \
+    -D_XOPEN_SOURCE=700 \
+    -D_FORTIFY_SOURCE=2 \
+    -g \
+    -O0 \
+    -fstack-protector \
+    -fomit-frame-pointer \
+    -pipe \
+    -pedantic -pedantic-errors \
+    -Werror \
+    -Weffc++ \
+    -Wall -Wextra -Wshadow -Wdeprecated \
+    -Wdiv-by-zero -Wfloat-equal -Wfloat-conversion -Wsign-compare -Wpointer-arith \
+    -Wuninitialized -Wunreachable-code \
+    -Wunused -Wunused-function -Wunused-label -Wunused-parameter -Wunused-but-set-parameter -Wunused-but-set-variable \
+    -Wunused-value -Wunused-variable -Wunused-result \
+    -Wmissing-field-initializers -Wmissing-format-attribute -Wmissing-include-dirs -Wmissing-noreturn")
+# Threads are necessary for linking the resulting binaries as UDPReceiver is running in parallel.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+find_package(Pangolin REQUIRED)
+set(BUILD_DIR ${CMAKE_BINARY_DIR}/../)
+set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../)
+
+################################################################################
+# Extract cluon-msc from cluon-complete.hpp.
+add_custom_command(OUTPUT ${BUILD_DIR}/cluon-msc
+    WORKING_DIRECTORY ${BUILD_DIR}
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${SOURCE_DIR}/src/${CLUON_COMPLETE} ${BUILD_DIR}/cluon-complete.hpp
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${BUILD_DIR}/cluon-complete.hpp ${BUILD_DIR}/cluon-complete.cpp
+    COMMAND ${CMAKE_CXX_COMPILER} -o ${BUILD_DIR}/cluon-msc ${BUILD_DIR}/cluon-complete.cpp -std=c++14 -pthread -D HAVE_CLUON_MSC
+    DEPENDS ${SOURCE_DIR}/src/${CLUON_COMPLETE})
+
+################################################################################
+# Generate opendlv-standard-message-set.{hpp,cpp} from ${OPENDLV_STANDARD_MESSAGE_SET} file.
+add_custom_command(OUTPUT ${BUILD_DIR}/opendlv-standard-message-set.cpp
+    WORKING_DIRECTORY ${BUILD_DIR}
+    COMMAND ${BUILD_DIR}/cluon-msc --cpp-sources --cpp-add-include-file=opendlv-standard-message-set.hpp --out=${BUILD_DIR}/opendlv-standard-message-set.cpp ${SOURCE_DIR}/src/${OPENDLV_STANDARD_MESSAGE_SET}
+    COMMAND ${BUILD_DIR}/cluon-msc --cpp-headers --out=${BUILD_DIR}/opendlv-standard-message-set.hpp ${SOURCE_DIR}/src/${OPENDLV_STANDARD_MESSAGE_SET}
+    DEPENDS ${SOURCE_DIR}/src/${OPENDLV_STANDARD_MESSAGE_SET} ${BUILD_DIR}/cluon-msc)
+
+# Add current build directory as include directory as it contains generated files.
+include_directories(SYSTEM ${BUILD_DIR})
+include_directories(SYSTEM ${SOURCE_DIR}/thirdparty)
+
+################################################################################
+# Gather all object code first to avoid double compilation. This needs to be done for all added objects, can become very long? Why is this object and not static which works
+
+###############################################################################
+# Including g2o in /usr/include
+include_directories(SYSTEM /usr/include)
+include_directories(SYSTEM /usr/local/include)
+include_directories(SYSTEM ${Pangolin_INCLUDE_DIRS})
+link_directories(SYSTEM /usr/lib) #Access g2o
+link_directories(SYSTEM /usr/local/lib) #Access g2o
+
+
+################################################################################
+# Link libs
+set(LIBRARIES Threads::Threads ${Pangolin_LIBRARIES} g2o_core g2o_solver_eigen g2o_types_slam2d g2o_stuff)
+
+include_directories(${SOURCE_DIR}/src)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+add_library(${PROJECT_NAME}-core STATIC ${SOURCE_DIR}/src/slam.cpp ${SOURCE_DIR}/src/cone.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/viewer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/drawer.cpp ${BUILD_DIR}/opendlv-standard-message-set.cpp ${SOURCE_DIR}/src/collector.cpp)
+
+################################################################################
+# Create executable.
+add_executable(${PROJECT_NAME} ${CMAKE_CURRENT_SOURCE_DIR}/src/${PROJECT_NAME}.cpp) #Creates exe of the main .cpp (more like bin)
+target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}-core ${LIBRARIES}) #Links the exe with Libraries like the objects added above and g2o
+
+################################################################################
+# Enable unit testing.
+enable_testing()
+add_executable(${PROJECT_NAME}-runner ${SOURCE_DIR}/test/tests-cfsd18-perception-skidpad.cpp)
+target_link_libraries(${PROJECT_NAME}-runner ${LIBRARIES}  ${PROJECT_NAME}-core)
+add_test(NAME ${PROJECT_NAME}-runner COMMAND ${PROJECT_NAME}-runner)
+
+################################################################################
+# Install executable.
+install(TARGETS ${PROJECT_NAME} DESTINATION bin COMPONENT ${PROJECT_NAME})
