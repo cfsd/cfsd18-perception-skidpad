@@ -1066,7 +1066,7 @@ bool Slam::checkOffset(){
   double headingOffset = m_headingOffset + m_sendPose(2) - m_odometryData(2);
   double xOffset = m_xOffset + m_sendPose(0)-m_odometryData(0);
   double yOffset = m_yOffset + m_sendPose(1)-m_odometryData(1);
-  bool goodError = (fabs(xOffset-m_xOffset)<0.5 && fabs(yOffset-m_yOffset)<0.5 && fabs(headingOffset-m_headingOffset)<0.2);
+  bool goodError = (fabs(xOffset-m_xOffset)<1 && fabs(yOffset-m_yOffset)<1 && fabs(headingOffset-m_headingOffset)<0.3);
   std::cout << "xOffset: " << fabs(xOffset-m_xOffset) << " yOffset " << fabs(yOffset-m_yOffset) << " headingOffset " << fabs(headingOffset-m_headingOffset) << std::endl;
   if(goodError){
     //m_headingOffset = headingOffset;
