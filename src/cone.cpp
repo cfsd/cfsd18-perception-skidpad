@@ -116,16 +116,19 @@ bool Cone::isSeen(){
   return m_seen;
 }
 
-void Cone::addObservation(Eigen::Vector3d localObservation,Eigen::Vector3d globalObservation,int i){
+void Cone::addObservation(Eigen::Vector3d localObservation,Eigen::Vector3d pose,int i){
   if(!m_seen){
     m_seen = true;
   }
   Eigen::Vector2d newLocalObservation;
   newLocalObservation << localObservation(0),localObservation(1);
   m_localObserved.push_back(newLocalObservation);
-
+  double newX = localObservation(0)*cos(pose(2))-localObservation(1)*sin(pose(2));
+  double newY = localObservation(0)*sin(pose(2))+localObservation(1)*cos(pose(2));
   Eigen::Vector2d newGlobalObservation;
-  newGlobalObservation << globalObservation(0),globalObservation(1);
+  newGlobalObservation(0) = newX+pose(0);
+  newGlobalObservation(1) = newY+pose(1);
+
   m_observed.push_back(newGlobalObservation);
 
   m_connectedPoses.push_back(i);

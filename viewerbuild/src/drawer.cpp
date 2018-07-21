@@ -82,7 +82,7 @@ void Drawer::drawOptimizedCones(){
 }
 void Drawer::drawEssentialCones(){
 
-        m_cones = slam.drawLocalOptimizedCones();
+    m_cones = slam.drawLocalOptimizedCones();
     uint32_t nPoints = static_cast<unsigned int>(m_cones.size());
     if(nPoints == 0){
         return;

@@ -62,7 +62,7 @@ void Slam::setupOptimizer(){
   
   g2o::OptimizationAlgorithmGaussNewton* algorithmType = new g2o::OptimizationAlgorithmGaussNewton(g2o::make_unique<slamBlockSolver>(std::move(linearSolver)));
   m_optimizer.setAlgorithm(algorithmType); //Set optimizing method to Gauss Newton
-  m_optimizer.setVerbose(true);
+  //m_optimizer.setVerbose(true);
 }
 
 void Slam::nextSplitPose(cluon::data::Envelope data){
@@ -107,8 +107,8 @@ void Slam::nextPose(cluon::data::Envelope data){
 
   double newX = odometry.longitude()*cos(m_headingOffset)-odometry.latitude()*sin(m_headingOffset);
   double newY = odometry.longitude()*sin(m_headingOffset)+odometry.latitude()*cos(m_headingOffset);
-  double x = newX+m_xOffset;
-  double y = newY+m_yOffset;
+  double x = newX+m_xOffset+m_xError/m_errorCounter;
+  double y = newY+m_yOffset+m_yError/m_errorCounter;
 
   //toCartesian(const std::array<double, 2> &WGS84Reference, const std::array<double, 2> &WGS84Position)
 
@@ -121,7 +121,7 @@ void Slam::nextPose(cluon::data::Envelope data){
 
   m_odometryData << x,
                     y,
-                    odometry.heading()+m_headingOffset;
+                    odometry.heading()+m_headingOffset+m_headingError/m_errorCounter;
   //std::cout << "head: " << odometry.heading() << std::endl;                   
 }
 
@@ -182,7 +182,6 @@ void Slam::performSLAM(Eigen::MatrixXd cones){
   Eigen::Vector3d pose;
   if(!m_initialized){
     Initialize(cones,pose);
-    std::cout << "Initialized: " << m_initialized << std::endl;
   }
   if(m_readyStateMachine && m_readyState)
   {
@@ -196,15 +195,21 @@ void Slam::performSLAM(Eigen::MatrixXd cones){
     m_slamStartHeading = pose(2);
 
   }
-  std::cout << "pose" << pose << "sendPose: " << m_sendPose << std::endl;
   if(m_initialized){
     std::vector<std::pair<int,Eigen::Vector3d>> matchedCones = matchCones(cones,pose);
     std::cout << "Cones matched: " << matchedCones.size() << std::endl; 
     if(localizable(matchedCones)){
       pose = localizer(pose,matchedCones);
-      sendPose();
-      sendCones();
+      if(checkOffset()){
+        sendPose();
+        sendCones();
+        return;
+      }
     }
+    if(m_readyState){
+      m_sendPose = m_odometryData;
+    }
+    sendCones();
   }
 }
 
@@ -312,21 +317,29 @@ int Slam::updateCurrentCone(Eigen::Vector3d pose,uint32_t currentConeIndex, uint
 std::vector<std::pair<int,Eigen::Vector3d>> Slam::matchCones(Eigen::MatrixXd cones, Eigen::Vector3d &pose){
   std::lock_guard<std::mutex> lockMap(m_mapMutex);
   //Find match in conelist
-  std::vector<int> coneIndices = std::vector<int>(m_skidPadList.begin()+m_currentConeIndex,m_skidPadList.begin()+m_currentConeIndex+cones.cols()+5);
+  std::vector<int> coneIndices;
+  int mapSize = m_map.size();
+  for(int i = 0; i<mapSize; i++){
+    auto distance = m_map[i].getDistance(pose);
+    auto direction = m_map[i].getDirection(pose);
+    if(distance.distance()<10 && fabs(direction.azimuthAngle())<80){
+      coneIndices.push_back(i);
+    }
+  }
   std::pair<double,std::vector<int>> scoredMatch = evaluatePose(cones,pose,coneIndices);
   double avgDistance = std::get<0>(scoredMatch)/cones.cols();
   std::cout << "avgDistance: " << avgDistance << std::endl;
   if(avgDistance < 1.5){
     return filterMatch(cones,pose,scoredMatch);
   }
-  double headingCone = PI/2;
-  double headingStep = headingCone/100;
+  double headingCone = PI/4;
+  double headingStep = headingCone/50;
   pose(2) = pose(2) - headingCone/2;
   std::vector<std::pair<double,std::vector<int>>> matchVector;
   double minDistance = 1000;
   int minDistidx = 0;
   double bestPose = pose(2);
-  for(int i = 0; i<100;i++){
+  for(int i = 0; i<50;i++){
     scoredMatch = evaluatePose(cones,pose,coneIndices);
     matchVector.push_back(scoredMatch);
     double distance = std::get<0>(scoredMatch);
@@ -340,9 +353,37 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::matchCones(Eigen::MatrixXd con
   bestPose = (bestPose > PI)?(bestPose-2*PI):(bestPose);
   bestPose = (bestPose < -PI)?(bestPose+2*PI):(bestPose);
   pose(2) = bestPose;
-  std::cout << "bestHeading " << bestPose << std::endl;
+  bestPose = pose(0);
+  double distanceStep = 6/50;
+  pose(0) = pose(0)-3;
+  for(int i  = 0; i< 50; i++){
+    scoredMatch = evaluatePose(cones,pose,coneIndices);
+    matchVector.push_back(scoredMatch);
+    double distance = std::get<0>(scoredMatch);
+    if(distance<minDistance){
+      minDistance = distance;
+      minDistidx = i;
+      bestPose = pose(0);
+    }
+    pose(0) = pose(0) + distanceStep;
+  }
+  pose(0) = bestPose;
+  bestPose = pose(1);
+  pose(1) = pose(1)-3;
+  for(int i  = 0; i< 50; i++){
+    scoredMatch = evaluatePose(cones,pose,coneIndices);
+    matchVector.push_back(scoredMatch);
+    double distance = std::get<0>(scoredMatch);
+    if(distance<minDistance){
+      minDistance = distance;
+      minDistidx = i;
+      bestPose = pose(1);
+    }
+    pose(1) = pose(1) + distanceStep;
+  }
+  pose(1) = bestPose;
+  //std::cout << "bestHeading " << bestPose << std::endl;
   std::vector<std::pair<int,Eigen::Vector3d>> matchedCones = filterMatch(cones,pose,matchVector[minDistidx]);
-  m_currentConeIndex = updateCurrentCone(pose,m_currentConeIndex,10);
   return matchedCones;
 }
 
@@ -379,12 +420,12 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::filterMatch(Eigen::MatrixXd co
     Eigen::Vector3d globalCone = coneToGlobal(pose, cones.col(i));
     Eigen::Vector3d localCone = Spherical2Cartesian(cones(0,i),cones(1,i),cones(2,i));
     double distance = coneToMeasurementDistance(globalCone,m_map[matchedIndices[i]]);
-    if(distance<1.0){
-      m_map[matchedIndices[i]].addObservation(localCone,globalCone,m_poseId);
+    if(distance<1.5){
       std::pair<int,Eigen::Vector3d> match = std::make_pair(matchedIndices[i],localCone);
       matchedConeVector.push_back(match);
     }
   }
+  m_currentConeIndex = updateCurrentCone(pose,m_currentConeIndex,10);
   return matchedConeVector;
 }
 
@@ -403,7 +444,7 @@ Eigen::Vector3d Slam::localizer(Eigen::Vector3d pose, std::vector<std::pair<int,
   
   g2o::OptimizationAlgorithmGaussNewton* algorithmType = new g2o::OptimizationAlgorithmGaussNewton(g2o::make_unique<slamBlockSolver>(std::move(linearSolver)));
   localGraph.setAlgorithm(algorithmType); //Set optimizing method to Gauss Newton
-  localGraph.setVerbose(true);
+  //localGraph.setVerbose(true);
 
   if(matchedCones.size() > 1){  
     //Create graph
@@ -448,9 +489,27 @@ Eigen::Vector3d Slam::localizer(Eigen::Vector3d pose, std::vector<std::pair<int,
     g2o::VertexSE2* updatedPoseVertex = static_cast<g2o::VertexSE2*>(localGraph.vertex(1000));
     g2o::SE2 updatedPoseSE2 = updatedPoseVertex->estimate();
     Eigen::Vector3d updatedPose = updatedPoseSE2.toVector();
-  
+    std::lock_guard<std::mutex> lockMap(m_mapMutex);
+    for(uint32_t i = 0; i<matchedCones.size(); i++){
+      Eigen::Vector3d localObs = std::get<1>(matchedCones[i]);
+      int index = std::get<0>(matchedCones[i]);
+      double distance = std::sqrt(localObs(0)*localObs(0)+localObs(1)*localObs(1));
+      if(distance<m_coneMappingThreshold){
+        m_map[index].addObservation(localObs,updatedPose,m_poseId);
+      }
+    }
     {
       std::lock_guard<std::mutex> lockSend(m_sendMutex); 
+      double xError = updatedPose(0) - m_odometryData(0);
+      double yError = updatedPose(1) - m_odometryData(1);
+      double headingError = updatedPose(2) - m_odometryData(2);
+      bool goodError = (fabs(xError)<2 && fabs(yError)<2 && fabs(headingError)<0.3);
+      if(goodError && m_readyState){
+        //m_xError = m_xError+xError;
+        //m_yError = m_yError+yError;
+        //m_headingError = m_headingError+headingError;
+        //m_errorCounter++;
+      }
       m_sendPose << updatedPose(0),updatedPose(1),updatedPose(2);
       std::cout << "pose: " << m_sendPose(0) << " : " << m_sendPose(1) << " : " << m_sendPose(2) << std::endl;
     }
@@ -473,13 +532,13 @@ void Slam::optimizeEssentialGraph(uint32_t graphIndexStart, uint32_t graphIndexE
   
   g2o::OptimizationAlgorithmGaussNewton* algorithmType = new g2o::OptimizationAlgorithmGaussNewton(g2o::make_unique<slamBlockSolver>(std::move(linearSolver)));
   essentialGraph.setAlgorithm(algorithmType); //Set optimizing method to Gauss Newton
-  essentialGraph.setVerbose(true);
+  //essentialGraph.setVerbose(true);
 
   std::vector<int> posesToGraph;
   //Find cones of conespan and extract poses
   for(uint32_t i = graphIndexStart; i < graphIndexEnd+1; i++){
 
-    std::vector<int> currentConnectedPoses = m_coneList[i].getConnectedPoses();
+    std::vector<int> currentConnectedPoses = m_map[i].getConnectedPoses();
 
     for(uint32_t j = 0; j < currentConnectedPoses.size(); j++){
 
@@ -771,18 +830,17 @@ void Slam::sendPose(){
   opendlv::logic::sensation::Geolocation poseMessage;
   std::lock_guard<std::mutex> lockSend(m_sendMutex); 
   if(m_readyState){
-    double newX = m_sendPose(0)*cos(-m_headingOffset)-m_sendPose(1)*sin(-m_headingOffset);
-    double newY = m_sendPose(0)*sin(-m_headingOffset)+m_sendPose(1)*cos(-m_headingOffset);
-
-    double x = newX-m_xOffset;
-    double y = newY-m_yOffset;
-    double heading = m_sendPose(2)-m_headingOffset;
+    double x = m_sendPose(0)-m_xOffset-m_xError/m_errorCounter;
+    double y = m_sendPose(1)-m_yOffset-m_yError/m_errorCounter;
+    double heading = m_sendPose(2)-m_headingOffset-m_headingError/m_errorCounter;
+    double newX = x*cos(-m_headingOffset-m_headingError/m_errorCounter)-y*sin(-m_headingOffset-m_headingError/m_errorCounter);
+    double newY = x*sin(-m_headingOffset-m_headingError/m_errorCounter)+y*cos(-m_headingOffset-m_headingError/m_errorCounter);
     //std::array<double,2> cartesianPos;
     //cartesianPos[0] = m_sendPose(0);
     //cartesianPos[1] = m_sendPose(1);
     //std::array<double,2> sendGPS = wgs84::fromCartesian(m_gpsReference, cartesianPos);
-    poseMessage.longitude(x);
-    poseMessage.latitude(y);
+    poseMessage.longitude(newX);
+    poseMessage.latitude(newY);
     poseMessage.heading(static_cast<float>(heading));
     //std::chrono::system_clock::time_point tp = std::chrono::system_clock::now();
     cluon::data::TimeStamp sampleTime = m_geolocationReceivedTime;
@@ -969,7 +1027,7 @@ void Slam::initializeModule(){
         }
       }else{}
 
-      if(validGpsMeasurements > 5){
+      if(validGpsMeasurements > 2){
         gpsReadyState = true;
         std::cout << "GPS Ready .." << std::endl;
       }
@@ -986,7 +1044,7 @@ void Slam::initializeModule(){
         lastHead = static_cast<float>(m_odometryData(2));  
         validHeadMeasurements++;
       }
-      if(validVelMeasurements > 10 && validHeadMeasurements > 10){
+      if(validVelMeasurements > 3 && validHeadMeasurements > 3){
         imuReadyState = true;
         std::cout << "IMU Ready .." << std::endl;
       }
@@ -1002,9 +1060,20 @@ void Slam::initializeModule(){
       std::cout << "Slam ready check done !" << std::endl;  
     }
   }//While
-  
-  
+}
 
+bool Slam::checkOffset(){
+  double headingOffset = m_headingOffset + m_sendPose(2) - m_odometryData(2);
+  double xOffset = m_xOffset + m_sendPose(0)-m_odometryData(0);
+  double yOffset = m_yOffset + m_sendPose(1)-m_odometryData(1);
+  bool goodError = (fabs(xOffset-m_xOffset)<0.5 && fabs(yOffset-m_yOffset)<0.5 && fabs(headingOffset-m_headingOffset)<0.2);
+  std::cout << "xOffset: " << fabs(xOffset-m_xOffset) << " yOffset " << fabs(yOffset-m_yOffset) << " headingOffset " << fabs(headingOffset-m_headingOffset) << std::endl;
+  if(goodError){
+    //m_headingOffset = headingOffset;
+    m_xOffset = xOffset;
+    m_yOffset = yOffset;
+  }
+  return goodError;
 }
 void Slam::setStateMachineStatus(cluon::data::Envelope data){
   std::lock_guard<std::mutex> lockStateMachine(m_stateMachineMutex);

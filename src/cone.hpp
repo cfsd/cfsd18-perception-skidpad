@@ -51,7 +51,7 @@ class Cone{
     void setMeanY(double y);
     void setType(int type);
     void setId(int id);
-    void addObservation(Eigen::Vector3d localObservation,Eigen::Vector3d globalObservation,int i);
+    void addObservation(Eigen::Vector3d localObservation,Eigen::Vector3d pose,int i);
     Eigen::Vector2d getLocalConeObservation(int i);
     Eigen::Vector2d getGlobalConeObservation(int i);
     uint32_t getObservations();

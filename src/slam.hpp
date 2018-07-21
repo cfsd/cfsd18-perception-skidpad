@@ -92,7 +92,7 @@ public:
   void updateFromEssential(uint32_t poseStart, uint32_t poseEnd,uint32_t coneStart,uint32_t coneEnd, g2o::SparseOptimizer &essentialGraph);
   Eigen::Vector3d coneToGlobal(Eigen::Vector3d pose, Eigen::MatrixXd Cone);
   int updateCurrentCone(Eigen::Vector3d pose,uint32_t currentConeIndex, uint32_t remainingIter);
-
+  bool checkOffset();
   Eigen::Vector2d transformConeToCoG(double angle, double distance);
   Eigen::Vector3d Spherical2Cartesian(double azimuth, double zenimuth, double distance);
   void addConeMeasurements(int i);
@@ -120,6 +120,10 @@ public:
   double m_slamStartHeading = 0;
   double m_slamStartX = 0;
   double m_slamStartY = 0;
+  double m_xError = 0;
+  double m_yError = 0;
+  double m_headingError = 0;
+  int m_errorCounter = 1;
   bool m_initialized = false;
 
 
