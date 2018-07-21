@@ -187,7 +187,6 @@ void Slam::performSLAM(Eigen::MatrixXd cones){
   {
     std::lock_guard<std::mutex> lockSensor(m_sensorMutex);
     pose = m_odometryData;  
-    m_poses.push_back(pose);
   }else{
     pose = m_sendPose;
     m_slamStartX = pose(0);
@@ -200,6 +199,11 @@ void Slam::performSLAM(Eigen::MatrixXd cones){
     std::cout << "Cones matched: " << matchedCones.size() << std::endl; 
     if(localizable(matchedCones)){
       pose = localizer(pose,matchedCones);
+      if(m_poseId - m_lastOptimizedPoseId > 100){
+        //optimizeGraph();
+        m_lastOptimizedPoseId = m_poseId;
+        std::cout << "Optimized" << std::endl;
+      }
       if(checkOffset()){
         sendPose();
         sendCones();
@@ -353,7 +357,7 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::matchCones(Eigen::MatrixXd con
   bestPose = (bestPose > PI)?(bestPose-2*PI):(bestPose);
   bestPose = (bestPose < -PI)?(bestPose+2*PI):(bestPose);
   pose(2) = bestPose;
-  bestPose = pose(0);
+  /*bestPose = pose(0);
   double distanceStep = 6/50;
   pose(0) = pose(0)-3;
   for(int i  = 0; i< 50; i++){
@@ -381,7 +385,7 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::matchCones(Eigen::MatrixXd con
     }
     pose(1) = pose(1) + distanceStep;
   }
-  pose(1) = bestPose;
+  pose(1) = bestPose;*/
   //std::cout << "bestHeading " << bestPose << std::endl;
   std::vector<std::pair<int,Eigen::Vector3d>> matchedCones = filterMatch(cones,pose,matchVector[minDistidx]);
   return matchedCones;
@@ -490,6 +494,7 @@ Eigen::Vector3d Slam::localizer(Eigen::Vector3d pose, std::vector<std::pair<int,
     g2o::SE2 updatedPoseSE2 = updatedPoseVertex->estimate();
     Eigen::Vector3d updatedPose = updatedPoseSE2.toVector();
     std::lock_guard<std::mutex> lockMap(m_mapMutex);
+    std::lock_guard<std::mutex> lockSensor(m_sensorMutex);
     for(uint32_t i = 0; i<matchedCones.size(); i++){
       Eigen::Vector3d localObs = std::get<1>(matchedCones[i]);
       int index = std::get<0>(matchedCones[i]);
@@ -498,6 +503,8 @@ Eigen::Vector3d Slam::localizer(Eigen::Vector3d pose, std::vector<std::pair<int,
         m_map[index].addObservation(localObs,updatedPose,m_poseId);
       }
     }
+    m_poses.push_back(updatedPose);
+    m_poseId++;
     {
       std::lock_guard<std::mutex> lockSend(m_sendMutex); 
       double xError = updatedPose(0) - m_odometryData(0);
@@ -520,10 +527,10 @@ Eigen::Vector3d Slam::localizer(Eigen::Vector3d pose, std::vector<std::pair<int,
   return m_sendPose;
 }
 
-void Slam::optimizeEssentialGraph(uint32_t graphIndexStart, uint32_t graphIndexEnd){
+void Slam::optimizeGraph(){
 
   //Initialize graph
-  g2o::SparseOptimizer essentialGraph;
+  g2o::SparseOptimizer Graph;
   typedef g2o::BlockSolver<g2o::BlockSolverTraits<-1, -1> > slamBlockSolver;
   typedef g2o::LinearSolverEigen<slamBlockSolver::PoseMatrixType> slamLinearSolver;
   
@@ -531,26 +538,22 @@ void Slam::optimizeEssentialGraph(uint32_t graphIndexStart, uint32_t graphIndexE
   linearSolver->setBlockOrdering(false);
   
   g2o::OptimizationAlgorithmGaussNewton* algorithmType = new g2o::OptimizationAlgorithmGaussNewton(g2o::make_unique<slamBlockSolver>(std::move(linearSolver)));
-  essentialGraph.setAlgorithm(algorithmType); //Set optimizing method to Gauss Newton
+  Graph.setAlgorithm(algorithmType); //Set optimizing method to Gauss Newton
   //essentialGraph.setVerbose(true);
 
   std::vector<int> posesToGraph;
   //Find cones of conespan and extract poses
-  for(uint32_t i = graphIndexStart; i < graphIndexEnd+1; i++){
-
-    std::vector<int> currentConnectedPoses = m_map[i].getConnectedPoses();
-
-    for(uint32_t j = 0; j < currentConnectedPoses.size(); j++){
-
-      posesToGraph.push_back(currentConnectedPoses[j]);
+  for(uint32_t i = 0; i < m_map.size(); i++){
+    if(m_map[i].isSeen()){
+      std::vector<int> currentConnectedPoses = m_map[i].getConnectedPoses();
+      for(uint32_t j = 0; j < currentConnectedPoses.size(); j++){
+        posesToGraph.push_back(currentConnectedPoses[j]);
+      }      
     }
-
   }
   if(posesToGraph.size() > 0){
-
     uint32_t max = *std::max_element(posesToGraph.begin(), posesToGraph.end());
     uint32_t min = *std::min_element(posesToGraph.begin(), posesToGraph.end());
-
     //add poses to graph based on min and max
     for(uint32_t k = min; k < max+1; k++){
 
@@ -559,80 +562,75 @@ void Slam::optimizeEssentialGraph(uint32_t graphIndexStart, uint32_t graphIndexE
       poseVertex->setId(k);
       poseVertex->setEstimate(m_poses[k-1000]);
 
-      essentialGraph.addVertex(poseVertex);
+      Graph.addVertex(poseVertex);
 
       //Add edge
       if(k > min){
         g2o::EdgeSE2* odometryEdge = new g2o::EdgeSE2;
-        odometryEdge->vertices()[0] = essentialGraph.vertex(k-1);
-        odometryEdge->vertices()[1] = essentialGraph.vertex(k);
-        g2o::VertexSE2* prevVertex = static_cast<g2o::VertexSE2*>(essentialGraph.vertex(k-1));
+        odometryEdge->vertices()[0] = Graph.vertex(k-1);
+        odometryEdge->vertices()[1] = Graph.vertex(k);
+        g2o::VertexSE2* prevVertex = static_cast<g2o::VertexSE2*>(Graph.vertex(k-1));
         g2o::SE2 prevPose = prevVertex->estimate();
         g2o::SE2 currentPose = g2o::SE2(m_poses[k-1000](0), m_poses[k-1000](1), m_poses[k-1000](2));
         g2o::SE2 measurement = prevPose.inverse()*currentPose;
         odometryEdge->setMeasurement(measurement);
         odometryEdge->setInformation(Eigen::Matrix3d::Identity()*1/0.5); //Actual covariance should be configured
-        essentialGraph.addEdge(odometryEdge);
+        Graph.addEdge(odometryEdge);
       }
     }
 
     //Connect cones to poses
-    for(uint32_t i = graphIndexStart; i < graphIndexEnd; i++){
+    for(uint32_t i = 0; i < m_map.size(); i++){
+        if(m_map[i].isSeen()){
+          Eigen::Vector2d coneMeanXY;
+          if(!m_map[i].isOptimized()){
+            m_map[i].calculateMean();
+            coneMeanXY << m_map[i].getMeanX(),m_map[i].getMeanY();
+          }else{
+            coneMeanXY << m_map[i].getOptX(),m_map[i].getOptY();
+          }
 
-        Eigen::Vector2d coneMeanXY;
-        if(!m_coneList[i].isOptimized()){
-          m_coneList[i].calculateMean();
-          coneMeanXY << m_coneList[i].getMeanX(),m_coneList[i].getMeanY();
-        }else{
-          coneMeanXY << m_coneList[i].getOptX(),m_coneList[i].getOptY();
+          g2o::VertexPointXY* coneVertex = new g2o::VertexPointXY;
+          coneVertex->setId(m_map[i].getId());
+          coneVertex->setEstimate(coneMeanXY);
+          Graph.addVertex(coneVertex);
+          //Connect cones to POses
+          g2o::EdgeSE2PointXY* coneMeasurement = new g2o::EdgeSE2PointXY;
+          std::vector<int> connectedPoses = m_map[i].getConnectedPoses();
 
-        }
-      
-        g2o::VertexPointXY* coneVertex = new g2o::VertexPointXY;
-        coneVertex->setId(m_coneList[i].getId());
-        coneVertex->setEstimate(coneMeanXY);
-        essentialGraph.addVertex(coneVertex);
+          for(uint32_t j = 0; j < connectedPoses.size(); j++){
+            Eigen::Vector2d xyMeasurement;
+            xyMeasurement = getConeToPoseMeasurement(i,j);
+            //std::cout << "x: " << xyMeasurement(0) << " y: " << xyMeasurement(1) << std::endl; 
+            coneMeasurement->vertices()[0] = Graph.vertex(connectedPoses[j]);
+            coneMeasurement->vertices()[1] = Graph.vertex(m_map[i].getId());
+            coneMeasurement->setMeasurement(xyMeasurement);
 
-        //Connect cones to POses
-        g2o::EdgeSE2PointXY* coneMeasurement = new g2o::EdgeSE2PointXY;
-        std::vector<int> connectedPoses = m_coneList[i].getConnectedPoses();
-
-      for(uint32_t j = 0; j < connectedPoses.size(); j++){
-          Eigen::Vector2d xyMeasurement;
-          xyMeasurement = getConeToPoseMeasurement(i,j);
-          //std::cout << "x: " << xyMeasurement(0) << " y: " << xyMeasurement(1) << std::endl; 
-          coneMeasurement->vertices()[0] = essentialGraph.vertex(connectedPoses[j]);
-          coneMeasurement->vertices()[1] = essentialGraph.vertex(m_coneList[i].getId());
-          coneMeasurement->setMeasurement(xyMeasurement);
-
-          Eigen::Vector2d covXY = m_coneList[i].getCovariance();
-          Eigen::Matrix2d informationMatrix;
-          informationMatrix << 1/covXY(0),0,
+            Eigen::Vector2d covXY = m_map[i].getCovariance();
+            Eigen::Matrix2d informationMatrix;
+            informationMatrix << 1/covXY(0),0,
                               0,1/covXY(1);
-          coneMeasurement->setInformation(informationMatrix); //Placeholder value
-          //std::cout << "cX: " << covXY(0) << " cY: " << covXY(1) << std::endl;
-          essentialGraph.addEdge(coneMeasurement);
-
+            coneMeasurement->setInformation(informationMatrix); //Placeholder value
+            //std::cout << "cX: " << covXY(0) << " cY: " << covXY(1) << std::endl;
+            Graph.addEdge(coneMeasurement);
+          }
         }
       }
-
-
-    g2o::VertexSE2* firstRobotPose = dynamic_cast<g2o::VertexSE2*>(essentialGraph.vertex(min));
+    g2o::VertexSE2* firstRobotPose = dynamic_cast<g2o::VertexSE2*>(Graph.vertex(min));
     firstRobotPose->setFixed(true);
 
     /*g2o::VertexPointXY* firstCone = dynamic_cast<g2o::VertexPointXY*>(essentialGraph.vertex(graphIndexStart));
     firstCone->setFixed(true);*/
     //std::cout << "Optimizing" << std::endl;
-    essentialGraph.initializeOptimization();
-    essentialGraph.optimize(10); //Add config for amount of iterations??
+    Graph.initializeOptimization();
+    Graph.optimize(10); //Add config for amount of iterations??
     //std::cout << "Optimizing done." << std::endl;
 
-    updateFromEssential(min, max, graphIndexStart,graphIndexEnd, essentialGraph);
-    updateMap(graphIndexStart,graphIndexEnd,false);
+    updateFromEssential(min, max, Graph);
   }
 }
 
-void Slam::updateFromEssential(uint32_t poseStart, uint32_t poseEnd,uint32_t coneStart,uint32_t coneEnd, g2o::SparseOptimizer &essentialGraph){
+void Slam::updateFromEssential(uint32_t poseStart, uint32_t poseEnd, g2o::SparseOptimizer &essentialGraph){
 
   //Update pose vector
 
@@ -647,13 +645,15 @@ void Slam::updateFromEssential(uint32_t poseStart, uint32_t poseEnd,uint32_t con
    Eigen::Vector2d updatedConeXY;
    g2o::VertexPointXY* updatedConeVertex;
 
-   for(uint32_t i = coneStart; i < coneEnd; i++){
-    updatedConeVertex = static_cast<g2o::VertexPointXY*>(essentialGraph.vertex(i));
-    updatedConeXY = updatedConeVertex->estimate();
-    m_coneList[i].setOptX(updatedConeXY(0));
-    m_coneList[i].setOptY(updatedConeXY(1));
-    m_coneList[i].setOptimized();    
-   }
+   for(uint32_t i = 0; i < m_map.size(); i++){
+    if(m_map[i].isSeen()){
+      updatedConeVertex = static_cast<g2o::VertexPointXY*>(essentialGraph.vertex(i));
+      updatedConeXY = updatedConeVertex->estimate();
+      m_map[i].setOptX(updatedConeXY(0));
+      m_map[i].setOptY(updatedConeXY(1));
+      m_map[i].setOptimized(); 
+    }   
+  }
 }
 
 Eigen::Vector3d Slam::updatePoseFromGraph(){
@@ -767,7 +767,7 @@ void Slam::addConeMeasurements(int i){
 Eigen::Vector2d Slam::getConeToPoseMeasurement(int i,int j){
   
   Eigen::Vector2d cone;
-  cone = m_coneList[i].getLocalConeObservation(j); 
+  cone = m_map[i].getLocalConeObservation(j); 
   Eigen::Vector2d measurement;
   measurement << cone(0), cone(1);  
 
@@ -819,7 +819,7 @@ void Slam::sendCones()
       distanceMsg.objectId(m_conesPerPacket-1-i);
       od4.send(distanceMsg,sampleTime,m_senderStamp);
       opendlv::logic::perception::ObjectType typeMsg;
-      typeMsg.type(m_map[coneIndex].getType()); //Extract cone type
+      typeMsg.type(m_typeList[m_currentConeIndex+i]); //Extract cone type
       typeMsg.objectId(m_conesPerPacket-1-i);
       od4.send(typeMsg,sampleTime,m_senderStamp);
     }
@@ -980,8 +980,20 @@ void Slam::loadPath(std::string pathFile){
   std::string line;
   if(pathStream.is_open()){
     while(getline(pathStream,line)){
-      int id = std::stoi(line);
-      m_skidPadList.push_back(id);
+      std::stringstream linestream(line);
+      std::string value;
+      int counter = 1;
+      while(getline(linestream,value,',')){
+        if(counter == 1){
+          int type = std::stoi(value);
+          m_typeList.push_back(type);          
+        }
+        if(counter == 2){
+          int id = std::stoi(value);
+          m_skidPadList.push_back(id);
+        }
+        counter++;
+      }
     }
   }
   pathStream.close();
@@ -1066,7 +1078,7 @@ bool Slam::checkOffset(){
   double headingOffset = m_headingOffset + m_sendPose(2) - m_odometryData(2);
   double xOffset = m_xOffset + m_sendPose(0)-m_odometryData(0);
   double yOffset = m_yOffset + m_sendPose(1)-m_odometryData(1);
-  bool goodError = (fabs(xOffset-m_xOffset)<1 && fabs(yOffset-m_yOffset)<1 && fabs(headingOffset-m_headingOffset)<0.3);
+  bool goodError = (fabs(xOffset-m_xOffset)<1.0 && fabs(yOffset-m_yOffset)<1.0 && fabs(headingOffset-m_headingOffset)<0.3);
   std::cout << "xOffset: " << fabs(xOffset-m_xOffset) << " yOffset " << fabs(yOffset-m_yOffset) << " headingOffset " << fabs(headingOffset-m_headingOffset) << std::endl;
   if(goodError){
     //m_headingOffset = headingOffset;

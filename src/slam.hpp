@@ -88,8 +88,8 @@ public:
   Eigen::Vector3d localizer(Eigen::Vector3d pose, std::vector<std::pair<int,Eigen::Vector3d>> matchedCones);
   void createConnections(Eigen::MatrixXd cones, Eigen::Vector3d pose);
   void createFullGraph();
-  void optimizeEssentialGraph(uint32_t graphIndexStart, uint32_t graphIndexEnd);
-  void updateFromEssential(uint32_t poseStart, uint32_t poseEnd,uint32_t coneStart,uint32_t coneEnd, g2o::SparseOptimizer &essentialGraph);
+  void optimizeGraph();
+  void updateFromEssential(uint32_t poseStart, uint32_t poseEnd, g2o::SparseOptimizer &essentialGraph);
   Eigen::Vector3d coneToGlobal(Eigen::Vector3d pose, Eigen::MatrixXd Cone);
   int updateCurrentCone(Eigen::Vector3d pose,uint32_t currentConeIndex, uint32_t remainingIter);
   bool checkOffset();
@@ -125,6 +125,7 @@ public:
   double m_headingError = 0;
   int m_errorCounter = 1;
   bool m_initialized = false;
+  int m_lastOptimizedPoseId = 1000;
 
 
 
@@ -142,6 +143,7 @@ public:
   Eigen::Vector3d m_odometryData;
   std::array<double,2> m_gpsReference;
   std::vector<int> m_skidPadList = {};
+  std::vector<int> m_typeList = {};
   std::vector<Cone> m_map;
   std::vector<Cone> m_essentialMap = {};
   std::vector<Eigen::Vector3d> m_poses = {};
