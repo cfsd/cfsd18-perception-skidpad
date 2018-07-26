@@ -819,7 +819,12 @@ void Slam::sendCones()
       distanceMsg.objectId(m_conesPerPacket-1-i);
       od4.send(distanceMsg,sampleTime,m_senderStamp);
       opendlv::logic::perception::ObjectType typeMsg;
-      typeMsg.type(m_typeList[m_currentConeIndex+i]); //Extract cone type
+      if(m_currentConeIndex>m_skidPadList.size()-3){
+        typeMsg.type(50);
+      }
+      else{
+        typeMsg.type(m_typeList[m_currentConeIndex+i]); //Extract cone type
+      }
       typeMsg.objectId(m_conesPerPacket-1-i);
       od4.send(typeMsg,sampleTime,m_senderStamp);
     }
@@ -1078,7 +1083,7 @@ bool Slam::checkOffset(){
   double headingOffset = m_headingOffset + m_sendPose(2) - m_odometryData(2);
   double xOffset = m_xOffset + m_sendPose(0)-m_odometryData(0);
   double yOffset = m_yOffset + m_sendPose(1)-m_odometryData(1);
-  bool goodError = (fabs(xOffset-m_xOffset)<1.0 && fabs(yOffset-m_yOffset)<1.0 && fabs(headingOffset-m_headingOffset)<0.3);
+  bool goodError = (fabs(xOffset-m_xOffset)<1.0 && fabs(yOffset-m_yOffset)<1.0 && fabs(headingOffset-m_headingOffset)<0.6);
   std::cout << "xOffset: " << fabs(xOffset-m_xOffset) << " yOffset " << fabs(yOffset-m_yOffset) << " headingOffset " << fabs(headingOffset-m_headingOffset) << std::endl;
   if(goodError){
     //m_headingOffset = headingOffset;
