@@ -161,6 +161,11 @@ void Collector::GetCompleteFrame(){
 }
 
 void Collector::SendFrame(){
-    std::cout << "sending " << m_currentFrame.size() << " cones" << std::endl;
-    m_module.recieveCombinedMessage(m_currentFrameTime,m_currentFrame);
+    if(m_packetSize == 2){
+        std::cout << "sending " << m_currentFrame.size() << " cones" << std::endl;
+        m_module.recieveCombinedMessage(m_currentFrameTime,m_currentFrame);
+    }else if(m_packetSize == 3){
+        std::cout << "sending " << m_currentFrame.size() << " cones" << std::endl;
+        m_module.recieveCombinedCvMessage(m_currentFrameTime,m_currentFrame);
+    }
 }

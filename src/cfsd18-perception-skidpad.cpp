@@ -52,6 +52,9 @@ int32_t main(int32_t argc, char **argv) {
     Slam slam(commandlineArguments,od4);
     int gatheringTimeMs = (commandlineArguments.count("gatheringTimeMs")>0)?(std::stoi(commandlineArguments["gatheringTimeMs"])):(10);
     Collector collector(slam,gatheringTimeMs,2);
+    Collector collectorCv(slam,gatheringTimeMs,3);
+
+    uint32_t detectconeCvStamp = static_cast<uint32_t>(std::stoi(commandlineArguments["detectConeCvId"]));
     uint32_t detectconeStamp = static_cast<uint32_t>(std::stoi(commandlineArguments["detectConeId"]));
     uint32_t estimationStamp = static_cast<uint32_t>(std::stoi(commandlineArguments["estimationId"]));
     uint32_t slamStamp = static_cast<uint32_t>(std::stoi(commandlineArguments["id"])); 
@@ -65,11 +68,12 @@ int32_t main(int32_t argc, char **argv) {
       } 
     };
 
-    auto coneEnvelope{[&slammer = slam, senderStamp = detectconeStamp,&collector](cluon::data::Envelope &&envelope)
+    auto coneEnvelope{[&slammer = slam, cvStamp = detectconeCvStamp, attentionStamp = detectconeStamp,&collector,&collectorCv](cluon::data::Envelope &&envelope)
       {
-        if(envelope.senderStamp() == senderStamp){
+        if(envelope.senderStamp() == attentionStamp){
           collector.CollectCones(envelope);
-          //slammer.nextCone(envelope);
+        }else if(envelope.senderStamp() == cvStamp){
+          collectorCv.CollectCones(envelope);
         }
       }
     };

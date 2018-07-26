@@ -97,7 +97,7 @@ set(LIBRARIES Threads::Threads ${Pangolin_LIBRARIES} g2o_core g2o_solver_eigen g
 include_directories(${SOURCE_DIR}/src)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 
-add_library(${PROJECT_NAME}-core STATIC ${SOURCE_DIR}/src/slam.cpp ${SOURCE_DIR}/src/cone.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/viewer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/drawer.cpp ${BUILD_DIR}/opendlv-standard-message-set.cpp ${SOURCE_DIR}/src/collector.cpp)
+add_library(${PROJECT_NAME}-core STATIC ${SOURCE_DIR}/src/slam.cpp ${SOURCE_DIR}/src/cone.cpp ${SOURCE_DIR}/src/cvcones.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/viewer.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/drawer.cpp ${BUILD_DIR}/opendlv-standard-message-set.cpp ${SOURCE_DIR}/src/collector.cpp)
 
 ################################################################################
 # Create executable.
