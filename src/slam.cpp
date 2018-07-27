@@ -118,10 +118,12 @@ void Slam::nextPose(cluon::data::Envelope data){
   //WGS84ReadingTemp[1] = longitude;
 
   //std::array<double,2> WGS84Reading = wgs84::toCartesian(m_gpsReference, WGS84ReadingTemp); 
-
+  double heading = odometry.heading()+m_headingOffset;
+  heading = (heading > PI)?(heading-2*PI):(heading);
+  heading = (heading < -PI)?(heading+2*PI):(heading);
   m_odometryData << x,
                     y,
-                    odometry.heading()+m_headingOffset+m_headingError/m_errorCounter;
+                    heading;
   //std::cout << "head: " << odometry.heading() << std::endl;                   
 }
 
@@ -209,15 +211,14 @@ void Slam::performSLAM(Eigen::MatrixXd cones){
     std::lock_guard<std::mutex> lockSensor(m_sensorMutex);
     pose = m_odometryData;  
   }else{
-    pose = m_sendPose;
-    m_slamStartX = pose(0);
-    m_slamStartY = pose(1);
-    m_slamStartHeading = pose(2);
+    pose = m_previousPose;
+    //m_odometryData = pose;
 
   }
   if(m_initialized){
     std::vector<std::pair<int,Eigen::Vector3d>> matchedCones = matchCones(cones,pose);
-    std::cout << "Cones matched: " << matchedCones.size() << std::endl; 
+    std::cout << "Cones matched: " << matchedCones.size() << std::endl;
+    checkOffset();
     if(localizable(matchedCones)){
       pose = localizer(pose,matchedCones);
       if(m_poseId - m_lastOptimizedPoseId > 100){
@@ -347,11 +348,12 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::matchCones(Eigen::MatrixXd con
   for(int i = 0; i<mapSize; i++){
     auto distance = m_map[i].getDistance(pose);
     auto direction = m_map[i].getDirection(pose);
-    if(distance.distance()<10 && fabs(direction.azimuthAngle())<80){
+    if(distance.distance()<10 && fabs(direction.azimuthAngle())<110){
       coneIndices.push_back(i);
     }
   }
-  std::pair<double,std::vector<int>> scoredMatch = evaluatePose(cones,pose,coneIndices);
+  uint32_t conesThatFit = 0;
+  std::pair<double,std::vector<int>> scoredMatch = evaluatePose(cones,pose,coneIndices,conesThatFit);
   double avgDistance = std::get<0>(scoredMatch)/cones.cols();
   std::cout << "avgDistance: " << avgDistance << std::endl;
   if(avgDistance < 1.5){
@@ -362,22 +364,41 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::matchCones(Eigen::MatrixXd con
   pose(2) = pose(2) - headingCone/2;
   std::vector<std::pair<double,std::vector<int>>> matchVector;
   double minDistance = 1000;
-  int minDistidx = 0;
-  double bestPose = pose(2);
+  int minDistIdx = 0;
+  double bestHeading = pose(2);
+  uint32_t lastConeFitter = 0;
   for(int i = 0; i<50;i++){
-    scoredMatch = evaluatePose(cones,pose,coneIndices);
+    conesThatFit = 0;
+    bool foundFullMatch = false;
+    scoredMatch = evaluatePose(cones,pose,coneIndices,conesThatFit);
     matchVector.push_back(scoredMatch);
-    double distance = std::get<0>(scoredMatch);
-    if(distance<minDistance){
-      minDistance = distance;
-      minDistidx = i;
-      bestPose = pose(2);
+    double sumOfAllErrors = std::get<0>(scoredMatch);
+    bool betterSum = false;
+    if(sumOfAllErrors < minDistance){
+      betterSum = true;
+    }
+    //std::cout << "Fitted Cones: " << conesThatFits << std::endl;
+    if(conesThatFit == cones.cols() && !foundFullMatch){
+      std::cout << "new Best Heading: " << pose(2) << std::endl;
+      std::cout << "best Error: " << sumOfAllErrors << std::endl;
+      bestHeading = pose(2);
+      lastConeFitter = conesThatFit;
+      minDistance = sumOfAllErrors;
+      minDistIdx = i;
+      foundFullMatch = true;
+    }else if(conesThatFit > 1 && conesThatFit >= lastConeFitter && betterSum){
+      std::cout << "new Best Heading: " << pose(2) << std::endl;
+      std::cout << "best Error: " << sumOfAllErrors << std::endl;
+      bestHeading = pose(2);
+      minDistIdx = i;
+      lastConeFitter = conesThatFit;
+      minDistance = sumOfAllErrors;
     }
     pose(2) = pose(2) + headingStep;
   }
-  bestPose = (bestPose > PI)?(bestPose-2*PI):(bestPose);
-  bestPose = (bestPose < -PI)?(bestPose+2*PI):(bestPose);
-  pose(2) = bestPose;
+  bestHeading = (bestHeading > PI)?(bestHeading-2*PI):(bestHeading);
+  bestHeading = (bestHeading < -PI)?(bestHeading+2*PI):(bestHeading);
+  pose(2) = bestHeading;
   /*bestPose = pose(0);
   double distanceStep = 6/50;
   pose(0) = pose(0)-3;
@@ -408,13 +429,14 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::matchCones(Eigen::MatrixXd con
   }
   pose(1) = bestPose;*/
   //std::cout << "bestHeading " << bestPose << std::endl;
-  std::vector<std::pair<int,Eigen::Vector3d>> matchedCones = filterMatch(cones,pose,matchVector[minDistidx]);
+  std::vector<std::pair<int,Eigen::Vector3d>> matchedCones = filterMatch(cones,pose,matchVector[minDistIdx]);
   return matchedCones;
 }
 
-std::pair<double,std::vector<int>> Slam::evaluatePose(Eigen::MatrixXd cones, Eigen::Vector3d pose, std::vector<int> coneIndices){
+std::pair<double,std::vector<int>> Slam::evaluatePose(Eigen::MatrixXd cones, Eigen::Vector3d pose, std::vector<int> coneIndices, uint32_t &fitCones){
   double sumDistance = 0;
   std::vector<int> matchedCone;
+  std::vector<double> coneErrors;
   for(int i = 0; i<cones.cols();i++){
     Eigen::Vector3d globalCone = coneToGlobal(pose, cones.col(i));
     double minDistance = 100;
@@ -428,6 +450,12 @@ std::pair<double,std::vector<int>> Slam::evaluatePose(Eigen::MatrixXd cones, Eig
     }
     sumDistance = sumDistance+minDistance;
     matchedCone.push_back(minIndex);
+  }
+  fitCones = 0;
+  for(uint32_t l = 0; l < coneErrors.size(); l++){
+    if(coneErrors[l] < 1.5){
+      fitCones++;
+    }
   }
   std::pair<double,std::vector<int>> scoredMatches = std::make_pair(sumDistance,matchedCone);
   return scoredMatches;
@@ -730,12 +758,19 @@ Eigen::Vector3d Slam::coneToGlobal(Eigen::Vector3d pose, Eigen::MatrixXd cones){
   return cone;
 }
 
-Eigen::Vector2d Slam::transformConeToCoG(double angle, double distance){
+Eigen::Vector2d Slam::transformConeToCoG(double angle, double distance,bool behindCar){
   const double lidarDistToCoG = 1.5;
   double sign = angle/std::fabs(angle);
   angle = PI - std::fabs(angle*DEG2RAD); 
   double distanceNew = std::sqrt(lidarDistToCoG*lidarDistToCoG + distance*distance - 2*lidarDistToCoG*distance*std::cos(angle));
-  double angleNew = std::asin((std::sin(angle)*distance)/distanceNew )*RAD2DEG; 
+  double angleNew = (std::sin(angle)*distance)/distanceNew; 
+  if(behindCar){
+    angleNew = std::asin(angleNew)+2*(PI/2-std::asin(angleNew));
+    angleNew = angleNew*RAD2DEG;   
+  }
+  else{
+      angleNew = std::asin(angleNew)*RAD2DEG;
+  }
   Eigen::Vector2d transformed;
   transformed << angleNew*sign,distanceNew;
 
@@ -806,8 +841,9 @@ Eigen::Vector3d Slam::Spherical2Cartesian(double azimuth, double zenimuth, doubl
   //double xyDistance = distance * cos(azimuth * static_cast<double>(DEG2RAD));
   //azimuth = (azimuth > PI)?(azimuth-2*PI):(azimuth);
   //azimuth = (azimuth < -PI)?(azimuth+2*PI):(azimuth);
-
-  Eigen::Vector2d transformedCone = transformConeToCoG(azimuth,distance);
+  double oldX = distance * cos(zenimuth * static_cast<double>(DEG2RAD))*cos(azimuth * static_cast<double>(DEG2RAD));
+  Eigen::Vector2d transformedCone = transformConeToCoG(azimuth,distance,oldX<-1.5);
+  //std::cout << "transformedCOne: " << transformedCone << std::endl;
   azimuth = transformedCone(0);
   distance = transformedCone(1);
   double xData = distance * cos(zenimuth * static_cast<double>(DEG2RAD))*cos(azimuth * static_cast<double>(DEG2RAD));
@@ -882,7 +918,7 @@ void Slam::sendPose(){
   if(m_readyState){
     double x = m_sendPose(0)-m_xOffset-m_xError/m_errorCounter;
     double y = m_sendPose(1)-m_yOffset-m_yError/m_errorCounter;
-    double heading = m_sendPose(2)-m_headingOffset-m_headingError/m_errorCounter;
+    //double heading = m_sendPose(2)-m_headingOffset-m_headingError/m_errorCounter;
     double newX = x*cos(-m_headingOffset-m_headingError/m_errorCounter)-y*sin(-m_headingOffset-m_headingError/m_errorCounter);
     double newY = x*sin(-m_headingOffset-m_headingError/m_errorCounter)+y*cos(-m_headingOffset-m_headingError/m_errorCounter);
     //std::array<double,2> cartesianPos;
@@ -891,7 +927,7 @@ void Slam::sendPose(){
     //std::array<double,2> sendGPS = wgs84::fromCartesian(m_gpsReference, cartesianPos);
     poseMessage.longitude(newX);
     poseMessage.latitude(newY);
-    poseMessage.heading(static_cast<float>(heading));
+    poseMessage.heading(static_cast<float>(m_odometryData(2)-m_headingOffset));
     //std::chrono::system_clock::time_point tp = std::chrono::system_clock::now();
     cluon::data::TimeStamp sampleTime = m_geolocationReceivedTime;
     od4.send(poseMessage, sampleTime ,m_senderStamp);
@@ -1099,7 +1135,7 @@ void Slam::initializeModule(){
         }
       }else{}
 
-      if(validGpsMeasurements > 2){
+      if(validGpsMeasurements > 10){
         gpsReadyState = true;
         std::cout << "GPS Ready .." << std::endl;
       }
@@ -1116,7 +1152,7 @@ void Slam::initializeModule(){
         lastHead = static_cast<float>(m_odometryData(2));  
         validHeadMeasurements++;
       }
-      if(validVelMeasurements > 3 && validHeadMeasurements > 3){
+      if(validVelMeasurements > 10 && validHeadMeasurements > 10){
         imuReadyState = true;
         std::cout << "IMU Ready .." << std::endl;
       }
@@ -1135,17 +1171,29 @@ void Slam::initializeModule(){
 }
 
 bool Slam::checkOffset(){
-  double headingOffset = m_headingOffset + m_sendPose(2) - m_odometryData(2);
-  double xOffset = m_xOffset + m_sendPose(0)-m_odometryData(0);
-  double yOffset = m_yOffset + m_sendPose(1)-m_odometryData(1);
-  bool goodError = (fabs(xOffset-m_xOffset)<1.0 && fabs(yOffset-m_yOffset)<1.0 && fabs(headingOffset-m_headingOffset)<0.6);
-  std::cout << "xOffset: " << fabs(xOffset-m_xOffset) << " yOffset " << fabs(yOffset-m_yOffset) << " headingOffset " << fabs(headingOffset-m_headingOffset) << std::endl;
-  if(goodError){
-    //m_headingOffset = headingOffset;
-    m_xOffset = xOffset;
-    m_yOffset = yOffset;
+  if(m_readyState){
+    double headingOffset = m_headingOffset + m_sendPose(2) - m_odometryData(2);
+    double xOffset = m_xOffset + m_sendPose(0)-m_odometryData(0);
+    double yOffset = m_yOffset + m_sendPose(1)-m_odometryData(1);
+    bool goodError = (fabs(xOffset-m_xOffset)<0.7 && fabs(yOffset-m_yOffset)<0.7 && fabs(headingOffset-m_headingOffset)<0.4);
+    std::cout << "xOffset: " << fabs(xOffset-m_xOffset) << " yOffset " << fabs(yOffset-m_yOffset) << " headingOffset " << fabs(headingOffset-m_headingOffset) << std::endl;
+    std::cout << "headingOffset " << m_headingOffset << " xOffset " << m_xOffset << " yOffset " << m_yOffset << std::endl;
+    if(goodError){
+      //m_headingOffset = headingOffset;
+      m_xOffset = xOffset;
+      m_yOffset = yOffset;
+    }
+    return goodError;
   }
-  return goodError;
+  else{
+    double xDiff = m_sendPose(0) - m_previousPose(0);
+    double yDiff = m_sendPose(1) - m_previousPose(1);
+    double headingDiff = m_sendPose(2) - m_previousPose(2);
+    if(fabs(xDiff)<1.0 && fabs(yDiff)<1.0 && fabs(headingDiff)<0.2){
+      m_previousPose = m_sendPose;
+    }
+    return fabs(xDiff)<1.0 && fabs(yDiff)<1.0 && fabs(headingDiff)<0.2;
+  }
 }
 void Slam::setStateMachineStatus(cluon::data::Envelope data){
   std::lock_guard<std::mutex> lockStateMachine(m_stateMachineMutex);

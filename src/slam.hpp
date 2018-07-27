@@ -83,7 +83,7 @@ public:
   void performSLAM(Eigen::MatrixXd Cones);
   void Initialize(Eigen::MatrixXd cones,Eigen::Vector3d pose);
   std::vector<std::pair<int,Eigen::Vector3d>> matchCones(Eigen::MatrixXd cones, Eigen::Vector3d &pose);
-  std::pair<double,std::vector<int>> evaluatePose(Eigen::MatrixXd cones, Eigen::Vector3d pose, std::vector<int> coneIndices);
+  std::pair<double,std::vector<int>> evaluatePose(Eigen::MatrixXd cones, Eigen::Vector3d pose, std::vector<int> coneIndices, uint32_t &fitCones);
   double coneToMeasurementDistance(Eigen::Vector3d globalMeasurement,Cone cone);
   std::vector<std::pair<int,Eigen::Vector3d>> filterMatch(Eigen::MatrixXd cones, Eigen::Vector3d pose,std::pair<double,std::vector<int>> matchedCones);
   bool localizable(std::vector<std::pair<int,Eigen::Vector3d>> matchedCones);
@@ -95,7 +95,7 @@ public:
   Eigen::Vector3d coneToGlobal(Eigen::Vector3d pose, Eigen::MatrixXd Cone);
   int updateCurrentCone(Eigen::Vector3d pose,uint32_t currentConeIndex, uint32_t remainingIter);
   bool checkOffset();
-  Eigen::Vector2d transformConeToCoG(double angle, double distance);
+  Eigen::Vector2d transformConeToCoG(double angle, double distance,bool behindCar);
   Eigen::Vector3d Spherical2Cartesian(double azimuth, double zenimuth, double distance);
   Eigen::Vector3d Cartesian2Spherical(double x, double y, double z);
   void addConeMeasurements(int i);
@@ -167,6 +167,7 @@ public:
   bool m_loopClosing = false;
   bool m_loopClosingComplete = false;
   Eigen::Vector3d m_sendPose;
+  Eigen::Vector3d m_previousPose = {};
   std::mutex m_sendMutex;
   uint32_t m_senderStamp = 0;
   float m_yawRate = 0.0f;
