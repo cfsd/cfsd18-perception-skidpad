@@ -92,8 +92,9 @@ public:
   void updateFromEssential(uint32_t poseStart, uint32_t poseEnd, g2o::SparseOptimizer &essentialGraph);
   Eigen::Vector3d coneToGlobal(Eigen::Vector3d pose, Eigen::MatrixXd Cone);
   int updateCurrentCone(Eigen::Vector3d pose,uint32_t currentConeIndex, uint32_t remainingIter);
+  int updateCurrentCone(std::vector<std::pair<int,Eigen::Vector3d>> matchedConeVector);
   bool checkOffset();
-  Eigen::Vector2d transformConeToCoG(double angle, double distance);
+  Eigen::Vector2d transformConeToCoG(double angle, double distance, bool behindCar);
   Eigen::Vector3d Spherical2Cartesian(double azimuth, double zenimuth, double distance);
   void addConeMeasurements(int i);
   Eigen::Vector2d getConeToPoseMeasurement(int i, int j);

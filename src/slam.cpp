@@ -118,10 +118,13 @@ void Slam::nextPose(cluon::data::Envelope data){
   //WGS84ReadingTemp[1] = longitude;
 
   //std::array<double,2> WGS84Reading = wgs84::toCartesian(m_gpsReference, WGS84ReadingTemp); 
+  double heading = odometry.heading()+m_headingOffset;
+  heading = (heading > PI)?(heading-2*PI):(heading);
+  heading = (heading < -PI)?(heading+2*PI):(heading);
 
   m_odometryData << x,
                     y,
-                    odometry.heading()+m_headingOffset+m_headingError/m_errorCounter;
+                    heading;
   //std::cout << "head: " << odometry.heading() << std::endl;                   
 }
 
@@ -301,6 +304,24 @@ void Slam::Initialize(Eigen::MatrixXd cones,Eigen::Vector3d pose){
   }
 }
 
+int Slam::updateCurrentCone(std::vector<std::pair<int,Eigen::Vector3d>> matchedConeVector){
+  double minX = 10;
+  uint32_t minIndex = 0;
+  for(uint32_t i = 0; i<matchedConeVector.size(); i++){
+    Eigen::Vector3d localCone = std::get<1>(matchedConeVector[i]);
+    if(localCone(0)<minX){
+      minX = localCone(0);
+      minIndex = i;
+    }
+  }
+  if(minX<10){
+    return std::get<0>(matchedConeVector[minIndex]);
+  }
+  else{
+    return m_currentConeIndex;
+  }
+}
+
 int Slam::updateCurrentCone(Eigen::Vector3d pose,uint32_t currentConeIndex, uint32_t remainingIter){
   //currentConeIndex=(currentConeIndex<m_map.size())?(currentConeIndex):(currentConeIndex-m_map.size());
   int pathIndex = m_skidPadList[currentConeIndex];
@@ -313,7 +334,9 @@ int Slam::updateCurrentCone(Eigen::Vector3d pose,uint32_t currentConeIndex, uint
     return currentConeIndex-1;
   }
   if(distance.distance() < 10.0f && fabs(direction.azimuthAngle())>80.0f){
-    currentConeIndex = updateCurrentCone(pose,currentConeIndex+1,remainingIter);
+    if(distance.distance()>3.0f){
+      currentConeIndex = updateCurrentCone(pose,currentConeIndex+1,remainingIter);
+    }
   }
   return currentConeIndex;
 }
@@ -327,6 +350,9 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::matchCones(Eigen::MatrixXd con
     auto distance = m_map[i].getDistance(pose);
     auto direction = m_map[i].getDirection(pose);
     if(distance.distance()<10 && fabs(direction.azimuthAngle())<80){
+      coneIndices.push_back(i);
+    }
+    else if(distance.distance()<3){
       coneIndices.push_back(i);
     }
   }
@@ -421,15 +447,19 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::filterMatch(Eigen::MatrixXd co
   std::vector<int> matchedIndices = std::get<1>(matchedCones);
   std::vector<std::pair<int,Eigen::Vector3d>> matchedConeVector;
   for(int i = 0; i<cones.cols();i++){
+    if(fabs(cones(0,i))>90){
+      continue;
+    }
     Eigen::Vector3d globalCone = coneToGlobal(pose, cones.col(i));
     Eigen::Vector3d localCone = Spherical2Cartesian(cones(0,i),cones(1,i),cones(2,i));
     double distance = coneToMeasurementDistance(globalCone,m_map[matchedIndices[i]]);
-    if(distance<1.5){
+    if(distance<1.0){
       std::pair<int,Eigen::Vector3d> match = std::make_pair(matchedIndices[i],localCone);
       matchedConeVector.push_back(match);
     }
   }
   m_currentConeIndex = updateCurrentCone(pose,m_currentConeIndex,10);
+  //m_currentConeIndex = updateCurrentCone(matchedConeVector);
   return matchedConeVector;
 }
 
@@ -709,15 +739,21 @@ Eigen::Vector3d Slam::coneToGlobal(Eigen::Vector3d pose, Eigen::MatrixXd cones){
   return cone;
 }
 
-Eigen::Vector2d Slam::transformConeToCoG(double angle, double distance){
+Eigen::Vector2d Slam::transformConeToCoG(double angle, double distance, bool behindCar){
   const double lidarDistToCoG = 1.5;
   double sign = angle/std::fabs(angle);
   angle = PI - std::fabs(angle*DEG2RAD); 
   double distanceNew = std::sqrt(lidarDistToCoG*lidarDistToCoG + distance*distance - 2*lidarDistToCoG*distance*std::cos(angle));
-  double angleNew = std::asin((std::sin(angle)*distance)/distanceNew )*RAD2DEG; 
+  double angleNew = (std::sin(angle)*distance)/distanceNew; 
+  if(behindCar){
+    angleNew = std::asin(angleNew)+2*(PI/2-std::asin(angleNew));
+    angleNew = angleNew*RAD2DEG;   
+  }
+  else{
+      angleNew = std::asin(angleNew)*RAD2DEG;
+  }
   Eigen::Vector2d transformed;
   transformed << angleNew*sign,distanceNew;
-
   return transformed;
 }
 
@@ -785,8 +821,8 @@ Eigen::Vector3d Slam::Spherical2Cartesian(double azimuth, double zenimuth, doubl
   //double xyDistance = distance * cos(azimuth * static_cast<double>(DEG2RAD));
   //azimuth = (azimuth > PI)?(azimuth-2*PI):(azimuth);
   //azimuth = (azimuth < -PI)?(azimuth+2*PI):(azimuth);
-
-  Eigen::Vector2d transformedCone = transformConeToCoG(azimuth,distance);
+  double oldX = distance * cos(zenimuth * static_cast<double>(DEG2RAD))*cos(azimuth * static_cast<double>(DEG2RAD));
+  Eigen::Vector2d transformedCone = transformConeToCoG(azimuth,distance,oldX<-1.5);
   azimuth = transformedCone(0);
   distance = transformedCone(1);
   double xData = distance * cos(zenimuth * static_cast<double>(DEG2RAD))*cos(azimuth * static_cast<double>(DEG2RAD));
@@ -1083,7 +1119,7 @@ bool Slam::checkOffset(){
   double headingOffset = m_headingOffset + m_sendPose(2) - m_odometryData(2);
   double xOffset = m_xOffset + m_sendPose(0)-m_odometryData(0);
   double yOffset = m_yOffset + m_sendPose(1)-m_odometryData(1);
-  bool goodError = (fabs(xOffset-m_xOffset)<1.0 && fabs(yOffset-m_yOffset)<1.0 && fabs(headingOffset-m_headingOffset)<0.6);
+  bool goodError = (fabs(xOffset-m_xOffset)<0.4 && fabs(yOffset-m_yOffset)<0.4 && fabs(headingOffset-m_headingOffset)<0.15);
   std::cout << "xOffset: " << fabs(xOffset-m_xOffset) << " yOffset " << fabs(yOffset-m_yOffset) << " headingOffset " << fabs(headingOffset-m_headingOffset) << std::endl;
   if(goodError){
     //m_headingOffset = headingOffset;
