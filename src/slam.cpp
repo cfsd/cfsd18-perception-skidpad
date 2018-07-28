@@ -189,12 +189,14 @@ void Slam::performSLAM(Eigen::MatrixXd cones){
   if(m_readyStateMachine && m_readyState)
   {
     std::lock_guard<std::mutex> lockSensor(m_sensorMutex);
-    pose = m_odometryData;  
+    pose = m_odometryData;
+    m_poses.push_back(pose);  
   }else{
     pose = m_sendPose;
     m_slamStartX = pose(0);
     m_slamStartY = pose(1);
     m_slamStartHeading = pose(2);
+    m_poses.push_back(pose);
 
   }
   if(m_initialized){
@@ -533,7 +535,7 @@ Eigen::Vector3d Slam::localizer(Eigen::Vector3d pose, std::vector<std::pair<int,
         m_map[index].addObservation(localObs,updatedPose,m_poseId);
       }
     }
-    m_poses.push_back(updatedPose);
+    //m_poses.push_back(updatedPose);
     m_poseId++;
     {
       std::lock_guard<std::mutex> lockSend(m_sendMutex); 
@@ -871,11 +873,11 @@ void Slam::sendPose(){
   opendlv::logic::sensation::Geolocation poseMessage;
   std::lock_guard<std::mutex> lockSend(m_sendMutex); 
   if(m_readyState){
-    double x = m_sendPose(0)-m_xOffset-m_xError/m_errorCounter;
-    double y = m_sendPose(1)-m_yOffset-m_yError/m_errorCounter;
-    double heading = m_sendPose(2)-m_headingOffset-m_headingError/m_errorCounter;
-    double newX = x*cos(-m_headingOffset-m_headingError/m_errorCounter)-y*sin(-m_headingOffset-m_headingError/m_errorCounter);
-    double newY = x*sin(-m_headingOffset-m_headingError/m_errorCounter)+y*cos(-m_headingOffset-m_headingError/m_errorCounter);
+    double x = m_sendPose(0)-m_xOffset
+    double y = m_sendPose(1)-m_yOffset
+    double heading = m_sendPose(2)-m_headingOffset;
+    double newX = x*cos(-m_headingOffset)-y*sin(-m_headingOffset);
+    double newY = x*sin(-m_headingOffset)+y*cos(-m_headingOffset);
     //std::array<double,2> cartesianPos;
     //cartesianPos[0] = m_sendPose(0);
     //cartesianPos[1] = m_sendPose(1);
@@ -1116,13 +1118,15 @@ void Slam::initializeModule(){
 }
 
 bool Slam::checkOffset(){
+  m_sendPose(2) = (m_sendPose(2) > PI)?(m_sendPose(2)-2*PI):(m_sendPose(2));
+  m_sendPose(2) = (m_sendPose(2) < -PI)?(m_sendPose(2)+2*PI):(m_sendPose(2));
   double headingOffset = m_headingOffset + m_sendPose(2) - m_odometryData(2);
   double xOffset = m_xOffset + m_sendPose(0)-m_odometryData(0);
   double yOffset = m_yOffset + m_sendPose(1)-m_odometryData(1);
-  bool goodError = (fabs(xOffset-m_xOffset)<0.4 && fabs(yOffset-m_yOffset)<0.4 && fabs(headingOffset-m_headingOffset)<0.15);
+  bool goodError = (fabs(xOffset-m_xOffset)<0.3 && fabs(yOffset-m_yOffset)<0.3 && fabs(headingOffset-m_headingOffset)<0.1);
   std::cout << "xOffset: " << fabs(xOffset-m_xOffset) << " yOffset " << fabs(yOffset-m_yOffset) << " headingOffset " << fabs(headingOffset-m_headingOffset) << std::endl;
   if(goodError){
-    //m_headingOffset = headingOffset;
+    //m_headingError = headingOffset-m_headingOffset;
     m_xOffset = xOffset;
     m_yOffset = yOffset;
   }
