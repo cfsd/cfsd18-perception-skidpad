@@ -336,7 +336,7 @@ int Slam::updateCurrentCone(Eigen::Vector3d pose,uint32_t currentConeIndex, uint
     return currentConeIndex-1;
   }
   if(distance.distance() < 10.0f && fabs(direction.azimuthAngle())>80.0f){
-    if(distance.distance()>3.0f){
+    if(distance.distance()>2.0f){
       currentConeIndex = updateCurrentCone(pose,currentConeIndex+1,remainingIter);
     }
   }
@@ -354,7 +354,7 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::matchCones(Eigen::MatrixXd con
     if(distance.distance()<10 && fabs(direction.azimuthAngle())<80){
       coneIndices.push_back(i);
     }
-    else if(distance.distance()<3){
+    else if(distance.distance()<2){
       coneIndices.push_back(i);
     }
   }
@@ -873,8 +873,8 @@ void Slam::sendPose(){
   opendlv::logic::sensation::Geolocation poseMessage;
   std::lock_guard<std::mutex> lockSend(m_sendMutex); 
   if(m_readyState){
-    double x = m_sendPose(0)-m_xOffset
-    double y = m_sendPose(1)-m_yOffset
+    double x = m_sendPose(0)-m_xOffset;
+    double y = m_sendPose(1)-m_yOffset;
     double heading = m_sendPose(2)-m_headingOffset;
     double newX = x*cos(-m_headingOffset)-y*sin(-m_headingOffset);
     double newY = x*sin(-m_headingOffset)+y*cos(-m_headingOffset);
@@ -978,6 +978,8 @@ void Slam::setUp(std::map<std::string, std::string> configuration)
   std::string mapFilePath = configuration["mapFilePath"];
   std::string pathFile = configuration["pathFilePath"];
   m_senderStamp = static_cast<int>(std::stoi(configuration["id"]));
+  m_offsetLimit = std::stod(configuration["offsetDistanceLimit"]);
+  m_offsetHeadingLimit = std::stod(configuration["offsetHeadingLimit"]);
   loadMap(mapFilePath); 
   loadPath(pathFile);
 
@@ -1123,7 +1125,7 @@ bool Slam::checkOffset(){
   double headingOffset = m_headingOffset + m_sendPose(2) - m_odometryData(2);
   double xOffset = m_xOffset + m_sendPose(0)-m_odometryData(0);
   double yOffset = m_yOffset + m_sendPose(1)-m_odometryData(1);
-  bool goodError = (fabs(xOffset-m_xOffset)<0.3 && fabs(yOffset-m_yOffset)<0.3 && fabs(headingOffset-m_headingOffset)<0.1);
+  bool goodError = (fabs(xOffset-m_xOffset)<m_offsetLimit && fabs(yOffset-m_yOffset)<m_offsetLimit && fabs(headingOffset-m_headingOffset)<m_offsetHeadingLimit);
   std::cout << "xOffset: " << fabs(xOffset-m_xOffset) << " yOffset " << fabs(yOffset-m_yOffset) << " headingOffset " << fabs(headingOffset-m_headingOffset) << std::endl;
   if(goodError){
     //m_headingError = headingOffset-m_headingOffset;

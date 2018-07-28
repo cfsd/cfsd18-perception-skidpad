@@ -127,6 +127,8 @@ public:
   int m_errorCounter = 1;
   bool m_initialized = false;
   int m_lastOptimizedPoseId = 1000;
+  double m_offsetHeadingLimit = 0.2;
+  double m_offsetLimit = 0.5;
 
 
 
