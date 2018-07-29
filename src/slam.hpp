@@ -129,6 +129,7 @@ public:
   int m_lastOptimizedPoseId = 1000;
   double m_offsetHeadingLimit = 0.2;
   double m_offsetLimit = 0.5;
+  double m_behindThreshold = 3.0;
 
 
 

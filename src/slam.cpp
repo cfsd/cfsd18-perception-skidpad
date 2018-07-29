@@ -336,7 +336,7 @@ int Slam::updateCurrentCone(Eigen::Vector3d pose,uint32_t currentConeIndex, uint
     return currentConeIndex-1;
   }
   if(distance.distance() < 10.0f && fabs(direction.azimuthAngle())>80.0f){
-    if(distance.distance()>2.0f){
+    if(distance.distance()>m_behindThreshold){
       currentConeIndex = updateCurrentCone(pose,currentConeIndex+1,remainingIter);
     }
   }
@@ -980,6 +980,7 @@ void Slam::setUp(std::map<std::string, std::string> configuration)
   m_senderStamp = static_cast<int>(std::stoi(configuration["id"]));
   m_offsetLimit = std::stod(configuration["offsetDistanceLimit"]);
   m_offsetHeadingLimit = std::stod(configuration["offsetHeadingLimit"]);
+  m_behindThreshold = std::stod(configuration["behindThreshold"]);
   loadMap(mapFilePath); 
   loadPath(pathFile);
 
