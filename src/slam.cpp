@@ -156,12 +156,16 @@ void Slam::recieveCombinedMessage(cluon::data::TimeStamp currentFrameTime,std::m
       auto direction = std::get<0>(it->second);
       auto distance = std::get<1>(it->second);
       auto type = std::get<2>(it->second);
-      cones(0,coneIndex) = direction.azimuthAngle();
-      cones(1,coneIndex) = direction.zenithAngle();
-      cones(2,coneIndex) = distance.distance();
-      cones(3,coneIndex) = type.type();
-      coneIndex++;
+      double azimuth = direction.azimuthAngle();
+      if(fabs(azimuth)>90){
+        cones(0,coneIndex) = direction.azimuthAngle();
+        cones(1,coneIndex) = direction.zenithAngle();
+        cones(2,coneIndex) = distance.distance();
+        cones(3,coneIndex) = type.type();
+        coneIndex++;
+      }
       it++;
+      cones = cones.leftCols(coneIndex);
     }
     performSLAM(cones);
   }
@@ -449,13 +453,10 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::filterMatch(Eigen::MatrixXd co
   std::vector<int> matchedIndices = std::get<1>(matchedCones);
   std::vector<std::pair<int,Eigen::Vector3d>> matchedConeVector;
   for(int i = 0; i<cones.cols();i++){
-    if(fabs(cones(0,i))>90){
-      continue;
-    }
     Eigen::Vector3d globalCone = coneToGlobal(pose, cones.col(i));
     Eigen::Vector3d localCone = Spherical2Cartesian(cones(0,i),cones(1,i),cones(2,i));
     double distance = coneToMeasurementDistance(globalCone,m_map[matchedIndices[i]]);
-    if(distance<1.0){
+    if(distance<m_newConeThreshold){
       std::pair<int,Eigen::Vector3d> match = std::make_pair(matchedIndices[i],localCone);
       matchedConeVector.push_back(match);
     }
