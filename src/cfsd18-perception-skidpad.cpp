@@ -52,6 +52,8 @@ int32_t main(int32_t argc, char **argv) {
     Slam slam(commandlineArguments,od4);
     int gatheringTimeMs = (commandlineArguments.count("gatheringTimeMs")>0)?(std::stoi(commandlineArguments["gatheringTimeMs"])):(10);
     Collector collector(slam,gatheringTimeMs,2);
+
+    uint32_t yawStamp = static_cast<uint32_t>(std::stoi(commandlineArguments["estimationYawId"]));
     uint32_t detectconeStamp = static_cast<uint32_t>(std::stoi(commandlineArguments["detectConeId"]));
     uint32_t estimationStamp = static_cast<uint32_t>(std::stoi(commandlineArguments["estimationId"]));
     uint32_t slamStamp = static_cast<uint32_t>(std::stoi(commandlineArguments["id"])); 
@@ -82,7 +84,7 @@ int32_t main(int32_t argc, char **argv) {
       }
     };
 
-    auto yawRateEnvelope{[&slammer = slam, senderStamp = estimationStamp](cluon::data::Envelope &&envelope)
+    auto yawRateEnvelope{[&slammer = slam, senderStamp = yawStamp](cluon::data::Envelope &&envelope)
       {
         if(envelope.senderStamp() == senderStamp){
           slammer.nextYawRate(envelope);

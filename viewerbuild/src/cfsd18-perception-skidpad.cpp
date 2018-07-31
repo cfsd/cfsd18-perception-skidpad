@@ -72,7 +72,7 @@ int32_t main(int32_t argc, char **argv) {
     Drawer drawer(commandlineArguments,slam);
     Viewer viewer(commandlineArguments,drawer);
     std::thread viewThread (&Viewer::Run,viewer); 
-
+    uint32_t yawStamp = static_cast<uint32_t>(std::stoi(commandlineArguments["estimationYawId"]));
     uint32_t detectconeStamp = static_cast<uint32_t>(std::stoi(commandlineArguments["detectConeId"]));
     uint32_t estimationStamp = static_cast<uint32_t>(std::stoi(commandlineArguments["estimationId"]));
 
@@ -102,7 +102,7 @@ int32_t main(int32_t argc, char **argv) {
         }
       }
     };
-    auto yawRateEnvelope{[&slammer = slam, senderStamp = estimationStamp](cluon::data::Envelope &&envelope)
+    auto yawRateEnvelope{[&slammer = slam, senderStamp = yawStamp](cluon::data::Envelope &&envelope)
       {
         if(envelope.senderStamp() == senderStamp){
           slammer.nextYawRate(envelope);

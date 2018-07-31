@@ -79,6 +79,7 @@ public:
   Eigen::Vector3d updatePoseFromGraph();
   void addPosesToGraph();
   void performSLAM(Eigen::MatrixXd Cones);
+  Eigen::Vector3d projectPose();
   void Initialize(Eigen::MatrixXd cones,Eigen::Vector3d pose);
   std::vector<std::pair<int,Eigen::Vector3d>> matchCones(Eigen::MatrixXd cones, Eigen::Vector3d &pose);
   std::pair<double,std::vector<int>> evaluatePose(Eigen::MatrixXd cones, Eigen::Vector3d pose, std::vector<int> coneIndices);
@@ -131,6 +132,8 @@ public:
   double m_offsetLimit = 0.5;
   double m_behindThreshold = 3.0;
 
+  Eigen::Vector3d m_intPose = {};
+
 
 
 
@@ -172,7 +175,8 @@ public:
   float m_groundSpeed = 0.0f;
   cluon::data::TimeStamp m_yawReceivedTime = {};
   cluon::data::TimeStamp m_groundSpeedReceivedTime = {};
-  cluon::data::TimeStamp m_geolocationReceivedTime ={};
+  cluon::data::TimeStamp m_geolocationReceivedTime = {};
+  cluon::data::TimeStamp m_previousTimeStamp = {};
   std::vector<Cone> m_coneList = {};
   bool m_filterMap = false;
   bool m_localization;
