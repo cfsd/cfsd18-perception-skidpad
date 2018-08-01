@@ -224,6 +224,7 @@ void Slam::performSLAM(Eigen::MatrixXd cones){
     m_poses.push_back(pose);
     //pose = m_odometryData;  
   }else{
+    std::lock_guard<std::mutex> lockSensor(m_sensorMutex);
     pose = m_sendPose;
     m_poses.push_back(pose);
   }
@@ -581,10 +582,10 @@ Eigen::Vector3d Slam::localizer(Eigen::Vector3d pose, std::vector<std::pair<int,
       double headingError = updatedPose(2) - m_sendPose(2);
       bool goodError = false;
       if(m_readyState){
-        goodError = (fabs(xError)<0.5 && fabs(yError)<0.5 && fabs(headingError)<0.2);
+        goodError = (fabs(xError)<m_offsetLimit && fabs(yError)<m_offsetLimit && fabs(headingError)<m_offsetHeadingLimit);
       }
       else{
-        goodError = (fabs(xError)<1.0 && fabs(yError)<1.0 && fabs(headingError)<0.4);
+        goodError = (fabs(xError)<2*m_offsetLimit && fabs(yError)<2*m_offsetLimit && fabs(headingError)<2*m_offsetHeadingLimit);
       }
       if(goodError || !m_initialized){
         //m_xError = m_xError+xError;
