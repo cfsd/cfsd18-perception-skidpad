@@ -192,8 +192,6 @@ Eigen::Vector3d Slam::projectPose(){
   double rotation = m_yawRate*delta;
   double speed = m_groundSpeed*delta;
   speed = fabs(speed);
-  std::cout << "groundSpeed " << speed << std::endl;
-  std::cout << "rotation " << rotation << std::endl;
   Eigen::Vector3d pose = m_sendPose;
   if(fabs(speed)>0.001 && fabs(rotation)>0.00001){
     double x = pose(0)+speed*cos(pose(2));
@@ -205,8 +203,6 @@ Eigen::Vector3d Slam::projectPose(){
     heading = (heading < -PI)?(heading+2*PI):(heading);
     pose(2) = heading;
   }
-  std::cout << "prevPose " << m_sendPose << std::endl;
-  std::cout << "integrated pose: " << pose << std::endl;
   return pose;
 }
 
@@ -231,13 +227,13 @@ void Slam::performSLAM(Eigen::MatrixXd cones){
   Eigen::Vector3d guessedPose = pose;
   if(m_initialized){
     std::vector<std::pair<int,Eigen::Vector3d>> matchedCones = matchCones(cones,pose);
-    std::cout << "Cones matched: " << matchedCones.size() << std::endl; 
+    //std::cout << "Cones matched: " << matchedCones.size() << std::endl; 
     if(localizable(matchedCones)){
       pose = localizer(pose,matchedCones);
       if(m_poseId - m_lastOptimizedPoseId > 100){
         //optimizeGraph();
         m_lastOptimizedPoseId = m_poseId;
-        std::cout << "Optimized" << std::endl;
+        //std::cout << "Optimized" << std::endl;
       }
       if(checkOffset()){
         sendPose();
@@ -329,7 +325,7 @@ void Slam::Initialize(Eigen::MatrixXd cones,Eigen::Vector3d pose){
   }
   if(nRight == 2 && nLeft == 2){
     Eigen::Vector3d localizedPose = localizer(pose,matchedCones);
-    std::cout << "Start pose " << localizedPose << std::endl;
+    //std::cout << "Start pose " << localizedPose << std::endl;
     m_slamStartX = pose(0) - localizedPose(0);
     m_slamStartY = pose(1) - localizedPose(1);
     m_slamStartHeading = pose(2) - localizedPose(2);
@@ -404,7 +400,7 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::matchCones(Eigen::MatrixXd con
   }
   std::pair<double,std::vector<int>> scoredMatch = evaluatePose(cones,pose,coneIndices);
   double avgDistance = std::get<0>(scoredMatch)/cones.cols();
-  std::cout << "avgDistance: " << avgDistance << std::endl;
+  //std::cout << "avgDistance: " << avgDistance << std::endl;
   return filterMatch(cones,pose,scoredMatch);
   /*double headingCone = PI/4;
   double headingStep = headingCone/50;
@@ -597,7 +593,7 @@ Eigen::Vector3d Slam::localizer(Eigen::Vector3d pose, std::vector<std::pair<int,
       else{
         m_sendPose << pose(0),pose(1),pose(2);
       }
-      std::cout << "pose: " << m_sendPose(0) << " : " << m_sendPose(1) << " : " << m_sendPose(2) << std::endl;
+      //std::cout << "pose: " << m_sendPose(0) << " : " << m_sendPose(1) << " : " << m_sendPose(2) << std::endl;
     }
 
   }else{
@@ -679,7 +675,6 @@ void Slam::optimizeGraph(){
           for(uint32_t j = 0; j < connectedPoses.size(); j++){
             Eigen::Vector2d xyMeasurement;
             xyMeasurement = getConeToPoseMeasurement(i,j);
-            //std::cout << "x: " << xyMeasurement(0) << " y: " << xyMeasurement(1) << std::endl; 
             coneMeasurement->vertices()[0] = Graph.vertex(connectedPoses[j]);
             coneMeasurement->vertices()[1] = Graph.vertex(m_map[i].getId());
             coneMeasurement->setMeasurement(xyMeasurement);
@@ -689,7 +684,6 @@ void Slam::optimizeGraph(){
             informationMatrix << 1/covXY(0),0,
                               0,1/covXY(1);
             coneMeasurement->setInformation(informationMatrix); //Placeholder value
-            //std::cout << "cX: " << covXY(0) << " cY: " << covXY(1) << std::endl;
             Graph.addEdge(coneMeasurement);
           }
         }
@@ -697,12 +691,8 @@ void Slam::optimizeGraph(){
     g2o::VertexSE2* firstRobotPose = dynamic_cast<g2o::VertexSE2*>(Graph.vertex(min));
     firstRobotPose->setFixed(true);
 
-    /*g2o::VertexPointXY* firstCone = dynamic_cast<g2o::VertexPointXY*>(essentialGraph.vertex(graphIndexStart));
-    firstCone->setFixed(true);*/
-    //std::cout << "Optimizing" << std::endl;
     Graph.initializeOptimization();
     Graph.optimize(10); //Add config for amount of iterations??
-    //std::cout << "Optimizing done." << std::endl;
 
     updateFromEssential(min, max, Graph);
   }
@@ -904,7 +894,6 @@ void Slam::sendCones()
       od4.send(distanceMsg,sampleTime,m_senderStamp);
       opendlv::logic::perception::ObjectType typeMsg;
       if(m_currentConeIndex>m_skidPadList.size()-5){
-        std::cout << "sending 50" << std::endl;
         typeMsg.type(50);
       }
       else{
@@ -1062,7 +1051,6 @@ void Slam::loadMap(std::string mapFilePath){
       Cone cone = Cone(x,y,type,counter1);
       m_map.push_back(cone);
       counter1++;
-      std::cout << "Line Finished" << std::endl;
     }
     mapStream.close();
   }
@@ -1175,7 +1163,6 @@ bool Slam::checkOffset(){
   double xOffset = m_xOffset + m_sendPose(0)-m_odometryData(0);
   double yOffset = m_yOffset + m_sendPose(1)-m_odometryData(1);
   bool goodError = (fabs(xOffset-m_xOffset)<m_offsetLimit && fabs(yOffset-m_yOffset)<m_offsetLimit && fabs(headingOffset-m_headingOffset)<m_offsetHeadingLimit);
-  std::cout << "xOffset: " << fabs(xOffset-m_xOffset) << " yOffset " << fabs(yOffset-m_yOffset) << " headingOffset " << fabs(headingOffset-m_headingOffset) << std::endl;
   if(goodError){
     //m_headingError = headingOffset-m_headingOffset;
     //m_xOffset = xOffset;

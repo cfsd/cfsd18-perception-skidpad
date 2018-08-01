@@ -23,28 +23,44 @@ services:
             - odsupercomponent
         command: "/opt/od4/bin/odcockpit --cid=${CID}"
 
-    ukf:
-         image: ukf:test
-         network_mode: host
-         ipc: host
-         command: "opendlv-logic-cfsd18-sensation-ukf --cid=${CID} --cidDan=135 --id=114 --rackId=1206 --estimationId=112 --estimationIdRaw=108 --slamId=118 --stateMachineId=1401 --wheelEncoderIdLeft=1504 --wheelEncoderIdRight=1505 --refLatitude=57.719264 --refLongitude=11.957777 --Qx=1 --Qy=1 --QvelX=0.5 --QvelY=0.1 --Qyaw=0.2 --Qheading=1 --Rx=0.2 --Ry=0.2 --RvelX=0.3 --RaccX=0.00059 --RaccY=1 --Ryaw=0.2 --Rheading=0.5 --m=210 --Iz=200 --g=9.82 --l=1.53 --lf=0.765 --lr=0.765 --mu=0.9"
-
     cfsd18-sensation-attention:
-        image: attention:test
+        image: chalmersfsd/cfsd18-sensation-attention:pre-release-b8727c8
         network_mode: "host"
         ipc: host
-        command: "cfsd18-sensation-attention --cid=${CID} --verbose --id=116 --xBoundary=4 --yBoundary=12 --zUpperBoundary=0.6 --groundClusterDistanceThreshold=0.3 --groundClusterSizeThreshold=60 --connectDistanceThreshold=0.15 --minNumOfPointsForCone=3 --maxNumOfPointsForCone=300 --coneRadiusThreshold=0.15 --zRangeThreshold=0.0 --inlierRangeThreshold=0.06 --dotThreshold=0.1 --inlierFoundThreshold=500 --numberOfIterations=30 --stateMachineId=1401 --readyStateMachine=1"
-
-    cfsd18-cognition-detectconelane:
-         image: detectconelane:test
-         network_mode: "host"
-         ipc: host
-         command: cfsd18-cognition-detectconelane --cid=${CID} --id=211
+        command: "cfsd18-sensation-attention --cid=${CID} --cidCan=135 --id=117 --xBoundary=5 --yBoundary=12 --zUpperBoundary=0.6
+        --groundClusterDistanceThreshold=0.3 --groundClusterSizeThreshold=60 --connectDistanceThreshold=0.15 --minNumOfPointsForCone=3
+        --maxNumOfPointsForCone=300 --coneRadiusThreshold=0.15 --zRangeThreshold=0.0 --inlierRangeThreshold=0.06 --dotThreshold=0.1
+        --inlierFoundThreshold=500 --numberOfIterations=30 --stateMachineId=1401 --readyStateMachine=0"
 
     cfsd18-perception-skidpad:
-         image: skidpad:test
+         image: chalmersfsd/cfsd18-perception-skidpad:pre-release-c0ba199
          network_mode: "host"
          ipc: host
          volumes:
          - .:/opt/files/
-         command: "cfsd18-perception-skidpad --cid=133 --id=120 --stateMachineId=1401 --detectConeId=116 --estimationId=114 --estimationYawId=112 --gatheringTimeMs=20 --sameConeThreshold=1.5 --refLatitude=57.71395044 --refLongitude=11.94875904 --timeBetweenKeyframes=150 --coneMappingThreshold=5 --conesPerPacket=20 --lapSize=20 --mapFilePath=/opt/files/skidPadMap.txt --pathFilePath=/opt/files/skidPadPath.txt"
+         command: "cfsd18-perception-skidpad --cid=${CID} --id=121 --stateMachineId=1401 --detectConeId=117 --estimationId=115 --estimationYawId=112
+         --gatheringTimeMs=20 --sameConeThreshold=1.0 --refLatitude=57.71395044 --refLongitude=11.94875904 --timeBetweenKeyframes=150 --coneMappingThreshold=5
+         --offsetHeadingLimit=0.2 --offsetDistanceLimit=0.4 --behindThreshold=3.0 --conesPerPacket=20 --lapSize=20 --mapFilePath=/opt/files/skidPadMap.txt --pathFilePath=/opt/files/skidPadPath.txt"
+
+    ukf:
+        #latest
+        image: chalmersfsd/cfsd18-perception-ukf:pre-release-40a84f4
+        network_mode: host
+        ipc: host
+        command: "opendlv-logic-cfsd18-sensation-ukf --cid=${CID} --cidDan=135 --id=115 --slamId=120 --rackId=1206 --estimationId=112 
+        --estimationIdRaw=108 --stateMachineId=1401 --wheelEncoderIdLeft=1504 --wheelEncoderIdRight=1505 --refLatitude=57.719264 
+        --refLongitude=11.957777 --Qx=1 --Qy=1 --QvelX=0.5 --QvelY=0.1 --Qyaw=0.02 --Qheading=1 --Rx=0.2 --Ry=0.2 --RvelX=0.1 
+        --RaccX=0.00059 --RaccY=1 --Ryaw=0.2 --Rheading=0.5 --headingInitDistance=1 --m=210 --Iz=250 --g=9.82 --l=1.53 --lf=0.765 --lr=0.765 --mu=0.9"
+
+    cfsd18-cognition-detectconelane:
+        image: chalmersfsd/cfsd18-cognition-detectconelane:pre-release-40db98e
+        network_mode: "host"
+        command: "/usr/bin/cfsd18-cognition-detectconelane --cid=${CID} --verbose=0 --id=212 --detectConeId=118 --estimationId=115 --slamId=121 --simDetectConeId=231 --attentionId=117 \
+        --gatheringTimeMs=50 --separationTimeMs=10 \
+        --alwaysSlam=${FAKESLAM} --guessDistance=3.2 --minGuessSeparation=1.5 --latePerpGuessing=0 --useCurveDetection=0 --maxConeAngle=1.570796325 \
+        --maxConeWidthSeparation=3.2 --widthSeparationMargin=1.0 \
+        --maxConeLengthSeparation=5.0 --lengthSeparationMargin=1.0 \
+        --nLapsToGo=2 --lapCounterLockTime=20 --useNewConeLapCounter=1 --nMinOrangeFrames=2 --nMinDisappearanceFrames=2\
+        --useAccelerationMode=0 --useSkidpadMode=1 --behindMemoryDistance=3.0"
+
+
