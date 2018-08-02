@@ -399,7 +399,7 @@ std::vector<std::pair<int,Eigen::Vector3d>> Slam::matchCones(Eigen::MatrixXd con
     }
   }
   std::pair<double,std::vector<int>> scoredMatch = evaluatePose(cones,pose,coneIndices);
-  double avgDistance = std::get<0>(scoredMatch)/cones.cols();
+  //double avgDistance = std::get<0>(scoredMatch)/cones.cols();
   //std::cout << "avgDistance: " << avgDistance << std::endl;
   return filterMatch(cones,pose,scoredMatch);
   /*double headingCone = PI/4;
