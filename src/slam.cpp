@@ -142,7 +142,7 @@ void Slam::nextGroundSpeed(cluon::data::Envelope data){
 
   std::lock_guard<std::mutex> lockGroundSpeed(m_groundSpeedMutex);
   auto groundSpeed = cluon::extractMessage<opendlv::proxy::GroundSpeedReading>(std::move(data));
-  if(fabs(groundSpeed.groundSpeed()-m_groundSpeed)<1.0){
+  if(fabs(groundSpeed.groundSpeed()-m_groundSpeed)<1.0 || m_groundSpeed<1.0){
     m_groundSpeed = groundSpeed.groundSpeed();
     m_groundSpeedReceivedTime = data.sampleTimeStamp();
   } 
@@ -161,17 +161,13 @@ void Slam::recieveCombinedMessage(cluon::data::TimeStamp currentFrameTime,std::m
       auto direction = std::get<0>(it->second);
       auto distance = std::get<1>(it->second);
       auto type = std::get<2>(it->second);
-      double azimuth = direction.azimuthAngle();
-      if(fabs(azimuth)<90){
-        cones(0,coneIndex) = direction.azimuthAngle();
-        cones(1,coneIndex) = direction.zenithAngle();
-        cones(2,coneIndex) = distance.distance();
-        cones(3,coneIndex) = type.type();
-        coneIndex++;
-      }
+      cones(0,coneIndex) = direction.azimuthAngle();
+      cones(1,coneIndex) = direction.zenithAngle();
+      cones(2,coneIndex) = distance.distance();
+      cones(3,coneIndex) = type.type();
+      coneIndex++;
       it++;
     }
-    cones = cones.leftCols(coneIndex);
     performSLAM(cones);
   }
 }
@@ -193,7 +189,7 @@ Eigen::Vector3d Slam::projectPose(){
   double speed = m_groundSpeed*delta;
   speed = fabs(speed);
   Eigen::Vector3d pose = m_sendPose;
-  if(fabs(speed)>0.001 && fabs(rotation)>0.00001){
+  if(fabs(speed)>0.00001 && fabs(rotation)>0.0000001){
     double x = pose(0)+speed*cos(pose(2));
     double y = pose(1)+speed*sin(pose(2));
     double heading= pose(2)+rotation;
@@ -211,6 +207,10 @@ void Slam::performSLAM(Eigen::MatrixXd cones){
   std::lock_guard<std::mutex> lockStateMachine(m_stateMachineMutex);
   Eigen::Vector3d pose;
   if(!m_initialized){
+    if(m_newInitialization){
+      m_sendPose << 0,m_initY,1.57;
+      m_initialized = true;
+    }
     Initialize(cones,pose);
   }
   if(m_readyStateMachine && m_readyState)
@@ -1017,10 +1017,10 @@ void Slam::setUp(std::map<std::string, std::string> configuration)
   m_offsetLimit = std::stod(configuration["offsetDistanceLimit"]);
   m_offsetHeadingLimit = std::stod(configuration["offsetHeadingLimit"]);
   m_behindThreshold = std::stod(configuration["behindThreshold"]);
+  m_newInitialization = configuration.count("newInitialization") == 1;
+  m_initY = std::stod(configuration["initY"]);
   loadMap(mapFilePath); 
   loadPath(pathFile);
-
-
 }
 
 void Slam::loadMap(std::string mapFilePath){
@@ -1130,16 +1130,18 @@ void Slam::initializeModule(){
 
       std::lock_guard<std::mutex> lockGroundSpeed(m_groundSpeedMutex);
       if(std::fabs(m_groundSpeed - lastVel) > 0.001){ 
-        lastVel = m_groundSpeed;  
+        lastVel = m_groundSpeed;
+        std::cout << "one speed measurement" << std::endl;  
         validVelMeasurements++;
       }
       if(std::fabs(m_odometryData(2) - lastHead) > 0.001){
         lastHead = static_cast<float>(m_odometryData(2));  
         validHeadMeasurements++;
       }
-      if(validVelMeasurements > 3 && validHeadMeasurements > 3){
+      if(validVelMeasurements > 3){
         imuReadyState = true;
         std::cout << "IMU Ready .." << std::endl;
+        m_readyState = true;
       }
     }
 
@@ -1239,9 +1241,6 @@ void Slam::writeToPoseAndMapFile()
 
 }
 void Slam::tearDown()
-{
-}
+{}
 Slam::~Slam()
-{
-
-}
+{}

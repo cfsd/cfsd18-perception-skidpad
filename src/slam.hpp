@@ -127,6 +127,8 @@ public:
   double m_headingError = 0;
   int m_errorCounter = 1;
   bool m_initialized = false;
+  bool m_newInitialization = false;
+  double m_initY = -16.5;
   int m_lastOptimizedPoseId = 1000;
   double m_offsetHeadingLimit = 0.2;
   double m_offsetLimit = 0.5;
